@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .agent_index import AGENT_DIR_NAME, build_agent_index
+from .beir import materialize_beir_dataset, run_beir_suite
 from .config import Config
 from .eval import (
     analyze_eval_failures,
@@ -687,6 +688,62 @@ def cmd_hippocamp_suite(args) -> int:
     return 0
 
 
+def cmd_beir_import(args) -> int:
+    result = materialize_beir_dataset(
+        args.dataset,
+        Path(args.dest),
+        split=args.split,
+        max_cases=args.cases,
+    )
+    payload = {
+        "dataset": result.dataset,
+        "source_dir": str(result.source_dir),
+        "corpus_root": str(result.corpus_root),
+        "eval_set": str(result.eval_set_path),
+        "documents": result.documents,
+        "cases": result.cases,
+        "qrels": result.qrels,
+        "public_benchmark": True,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"BEIR dataset materialized: {result.dataset}")
+        print(f"- corpus={result.corpus_root}")
+        print(f"- eval_set={result.eval_set_path}")
+        print(f"- documents={result.documents} cases={result.cases} qrels={result.qrels}")
+    return 0
+
+
+def cmd_beir_suite(args) -> int:
+    datasets = tuple(d.strip() for d in args.datasets.split(",") if d.strip())
+    result = run_beir_suite(
+        Path(args.dest),
+        datasets=datasets,
+        split=args.split,
+        max_cases=args.cases,
+        top_k=args.top_k,
+        prepare=not args.no_prepare,
+    )
+    payload = {
+        "report": str(result.report_path),
+        "aggregate": result.aggregate,
+        "datasets": result.datasets,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"BEIR suite complete: {result.report_path}")
+        for mode, metrics in result.aggregate.items():
+            if isinstance(metrics, dict) and "cases" in metrics:
+                print(
+                    f"- {mode}: cases={metrics.get('cases')} hit@1={metrics.get('hit_at_1')} "
+                    f"hit@5={metrics.get('hit_at_5')} hit@10={metrics.get('hit_at_10')} "
+                    f"mrr={metrics.get('mrr')} seconds={metrics.get('seconds')}"
+                )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jikji", description="Prepare local files as agent-readable knowledge maps.")
     parser.add_argument("--version", action="version", version=f"jikji {__version__}")
@@ -865,6 +922,24 @@ def main(argv: list[str] | None = None) -> int:
     p_suite.add_argument("--no-fetch", action="store_true")
     p_suite.add_argument("--json", action="store_true")
     p_suite.set_defaults(func=cmd_hippocamp_suite)
+
+    p_beir_import = sub.add_parser("beir-import", help="download/materialize one public BEIR dataset as local files")
+    p_beir_import.add_argument("dest")
+    p_beir_import.add_argument("--dataset", default="scifact")
+    p_beir_import.add_argument("--split", default="test")
+    p_beir_import.add_argument("--cases", type=int, default=200)
+    p_beir_import.add_argument("--json", action="store_true")
+    p_beir_import.set_defaults(func=cmd_beir_import)
+
+    p_beir_suite = sub.add_parser("beir-suite", help="run public BEIR local-file retrieval suite")
+    p_beir_suite.add_argument("dest")
+    p_beir_suite.add_argument("--datasets", default="scifact,nfcorpus,arguana")
+    p_beir_suite.add_argument("--split", default="test")
+    p_beir_suite.add_argument("--cases", type=int, default=200)
+    p_beir_suite.add_argument("--top-k", type=int, default=10)
+    p_beir_suite.add_argument("--no-prepare", action="store_true")
+    p_beir_suite.add_argument("--json", action="store_true")
+    p_beir_suite.set_defaults(func=cmd_beir_suite)
 
     args = parser.parse_args(argv)
     if args.cmd is None:

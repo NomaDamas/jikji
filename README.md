@@ -79,31 +79,76 @@ map-reading diagnostics.
 precomputed lexical/content/metadata index used by `jikji search` for instant
 lookup without changing original files or folders.
 
-## Benchmark snapshot
+## Public benchmark snapshot
 
-Measured on 2026-05-27 on this project workstation. `raw` is the baseline
-filesystem/map-free lexical candidate search used by the benchmark harness;
-`jikji` uses the generated `.jikji/search_index.sqlite` plus Jikji map cards. No
-embeddings, vector DB, or cloud parsing are used.
+Measured on 2026-05-27 on this project workstation. These results use public or
+publishable benchmark data only. Private local-folder results are treated as
+development diagnostics and are not used as headline evidence.
 
-Frozen mixed `test` split: 6 roots, 481 cases, including real code
-repositories, HippoCamp public document subsets, and parser-format smoke data.
+No embeddings, vector DB, or cloud parsing are used by Jikji indexing/search.
+
+### Actual local-agent comparison
+
+Claude Code was run as the local agent on a public HippoCamp subset. `raw` means
+Claude Code searched the original files/folders and was instructed not to use
+Jikji. `claude+jikji` means Claude Code received `jikji search` candidates and
+selected final paths from them.
 
 ```text
-Mode     Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Search seconds
-raw      481    0.6611  0.7734  0.7942  0.8170  0.7216  139.783
-jikji    481    0.9189  0.9834  0.9855  0.9855  0.9506   14.692
+Dataset              Agent mode     Cases  Hit@1   Hit@5   Hit@10  Seconds  Avg sec/case
+HippoCamp public     raw            6      1.0000  1.0000  1.0000  325.979  54.330
+HippoCamp public     claude+jikji   6      1.0000  1.0000  1.0000   49.033   8.172
 ```
 
-Large local folder check: `/home/cheol/Downloads`, 20,158 files and 1,531
-folders. The Jikji index occupied 486 MB total, including a 277 MB instant
-SQLite index. Prepare took 124.565 seconds; repeated agent searches then use the
-prebuilt index.
+This small actual-agent run shows equal accuracy with about 6.6x lower elapsed
+agent time when Jikji provides the candidate list.
+
+### Public deterministic retrieval suites
+
+The deterministic harness is not a replacement for an agent benchmark; it is a
+wide regression test for the Jikji map/search layer. `raw` is a map-free lexical
+candidate baseline over the same public local files; `jikji` uses
+`.jikji/search_index.sqlite` plus Jikji map cards.
+
+BEIR public suite materialized each corpus document as a local Markdown file:
+SciFact, NFCorpus, and ArguAna, 200 qrel-backed queries each.
 
 ```text
-Mode     Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Search seconds
-raw      240    0.4708  0.5292  0.5458  0.5667  0.5044  124.688
-jikji    240    0.7583  0.8542  0.8750  0.9083  0.8123   42.928
+Dataset            Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Seconds
+BEIR 3 datasets    raw    600    0.2200  0.3217  0.3783  0.4500  0.2874  295.939
+BEIR 3 datasets    jikji  600    0.2283  0.4350  0.5033  0.5967  0.3485  264.868
+```
+
+Per-dataset BEIR results:
+
+```text
+Dataset   Docs   Cases  Mode   Hit@1   Hit@5   Hit@10  MRR
+SciFact   5,183  200    raw    0.3500  0.5550  0.6400  0.4344
+SciFact   5,183  200    jikji  0.3350  0.5400  0.6100  0.4205
+NFCorpus  3,633  200    raw    0.3100  0.5100  0.5800  0.3940
+NFCorpus  3,633  200    jikji  0.3500  0.5750  0.6350  0.4507
+ArguAna   8,674  200    raw    0.0000  0.0700  0.1300  0.0338
+ArguAna   8,674  200    jikji  0.0000  0.3950  0.5450  0.1743
+```
+
+HippoCamp public no-leak deterministic check:
+
+```text
+Dataset           Mode   Cases  Hit@1   Hit@5   Hit@10  MRR
+HippoCamp public  raw    18     0.6667  0.7778  0.8889  0.7238
+HippoCamp public  jikji  18     0.6111  0.8333  0.9444  0.6935
+```
+
+Reproducible commands:
+
+```bash
+jikji beir-suite .benchmarks/public_beir \
+  --datasets scifact,nfcorpus,arguana \
+  --cases 200 --top-k 10 --json
+
+jikji bench-run .benchmarks/hippocamp-large/Adam_Subset \
+  --eval-set .benchmarks/hippocamp_eval_set_220_noleak.jsonl \
+  --modes raw,jikji --top-k 10 --json
 ```
 
 Validation commands for this snapshot:
