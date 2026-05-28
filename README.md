@@ -97,18 +97,19 @@ development diagnostics and are not used as headline evidence.
 
 No embeddings, vector DB, or cloud parsing are used by Jikji indexing/search.
 
-### Actual local-agent comparison
+### Actual local-agent comparison — primary evidence
+
+Headline benchmark claims should compare **raw local agent** vs **the same agent with Jikji attached**. The deterministic raw-vs-jikji tables below are only regression diagnostics for the map/search layer, not the main product claim.
 
 Claude Code was run as the local agent on a public HippoCamp subset. `raw` means
 Claude Code searched the original files/folders and was instructed not to use
 Jikji. `claude+jikji` means Claude Code received `jikji search` candidates and
 selected final paths from them.
 
-```text
-Dataset              Agent mode     Cases  Hit@1   Hit@5   Hit@10  Seconds  Avg sec/case
-HippoCamp public     raw            6      1.0000  1.0000  1.0000  325.979  54.330
-HippoCamp public     claude+jikji   6      1.0000  1.0000  1.0000   49.033   8.172
-```
+| Dataset | Agent mode | Cases | Hit@1 | Hit@5 | Hit@10 | Seconds | Avg sec/case |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| HippoCamp public | raw Claude Code | 6 | 1.0000 | 1.0000 | 1.0000 | 325.979 | 54.330 |
+| HippoCamp public | Claude Code + Jikji | 6 | 1.0000 | 1.0000 | 1.0000 | 49.033 | 8.172 |
 
 This small actual-agent run shows equal accuracy with about 6.6x lower elapsed
 agent time when Jikji provides the candidate list.
@@ -117,11 +118,10 @@ Hermes Agent was also run on a public MIRACL-VISION materialized-document subset
 after adding `jikji brief`. `hermes+jikji` received the query-specific brief
 (candidate paths, evidence, route order) and could still inspect files if needed.
 
-```text
-Dataset                 Agent mode     Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/case
-MIRACL-VISION public    hermes raw     8      0.7500  0.8750  0.8750  0.8750  268.381  33.548
-MIRACL-VISION public    hermes+jikji   8      0.7500  0.8750  0.8750  1.0000  194.967  24.371
-```
+| Dataset | Agent mode | Cases | Hit@1 | Hit@3 | Hit@5 | Hit@10 | Seconds | Avg sec/case |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| MIRACL-VISION public | raw Hermes | 8 | 0.7500 | 0.8750 | 0.8750 | 0.8750 | 268.381 | 33.548 |
+| MIRACL-VISION public | Hermes + Jikji | 8 | 0.7500 | 0.8750 | 0.8750 | 1.0000 | 194.967 | 24.371 |
 
 This small actual-agent run shows equal Hit@5, higher Hit@10, and about 1.38x
 lower elapsed agent time. The public corpus/eval are under
@@ -132,20 +132,19 @@ Hermes was also run on a bounded EDiTh / Véracier Industries enterprise-PDF
 subset: 42 public PDFs extracted from the 1.5GB archive, with 3 file-retrieval
 questions from the answer key.
 
-```text
-Dataset            Agent mode     Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/case
-EDiTh PDF subset   hermes raw     3      1.0000  1.0000  1.0000  1.0000  152.777  50.926
-EDiTh PDF subset   hermes+jikji   3      1.0000  1.0000  1.0000  1.0000  120.852  40.284
-```
+| Dataset | Agent mode | Cases | Hit@1 | Hit@3 | Hit@5 | Hit@10 | Seconds | Avg sec/case |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| EDiTh PDF subset | raw Hermes | 3 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 152.777 | 50.926 |
+| EDiTh PDF subset | Hermes + Jikji | 3 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 120.852 | 40.284 |
 
 This EDiTh run is intentionally small because the public archive is large and
 the answer key has only a few explicit file-list retrieval questions, but it is
 closer to Jikji's target than Markdown-only corpora: real PDF files,
 searchable/scanned/mixed formats, multiple languages, and multi-file answers.
 
-### Public deterministic retrieval suites
+### Public deterministic retrieval suites — secondary diagnostics
 
-The deterministic harness is not a replacement for an agent benchmark; it is a
+The deterministic harness is not a replacement for a raw-agent vs Jikji-agent benchmark; it is a
 wide regression test for the Jikji map/search layer. `raw` is a map-free lexical
 candidate baseline over the same public local files; `jikji` uses
 `.jikji/search_index.sqlite` plus Jikji map cards.
@@ -153,48 +152,43 @@ candidate baseline over the same public local files; `jikji` uses
 BEIR public suite materialized each corpus document as a local Markdown file:
 SciFact, NFCorpus, and ArguAna, 200 qrel-backed queries each.
 
-```text
-Dataset            Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Seconds
-BEIR 3 datasets    raw    600    0.2200  0.3217  0.3783  0.4500  0.2874  295.939
-BEIR 3 datasets    jikji  600    0.2283  0.4350  0.5033  0.5967  0.3485  264.868
-```
+| Dataset | Mode | Cases | Hit@1 | Hit@3 | Hit@5 | Hit@10 | MRR | Seconds |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| BEIR 3 datasets | raw lexical diagnostic | 600 | 0.2200 | 0.3217 | 0.3783 | 0.4500 | 0.2874 | 295.939 |
+| BEIR 3 datasets | Jikji index diagnostic | 600 | 0.2283 | 0.4350 | 0.5033 | 0.5967 | 0.3485 | 264.868 |
 
 Per-dataset BEIR results:
 
-```text
-Dataset   Docs   Cases  Mode   Hit@1   Hit@5   Hit@10  MRR
-SciFact   5,183  200    raw    0.3500  0.5550  0.6400  0.4344
-SciFact   5,183  200    jikji  0.3350  0.5400  0.6100  0.4205
-NFCorpus  3,633  200    raw    0.3100  0.5100  0.5800  0.3940
-NFCorpus  3,633  200    jikji  0.3500  0.5750  0.6350  0.4507
-ArguAna   8,674  200    raw    0.0000  0.0700  0.1300  0.0338
-ArguAna   8,674  200    jikji  0.0000  0.3950  0.5450  0.1743
-```
+| Dataset | Docs | Cases | Mode | Hit@1 | Hit@5 | Hit@10 | MRR |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SciFact | 5,183 | 200 | raw lexical diagnostic | 0.3500 | 0.5550 | 0.6400 | 0.4344 |
+| SciFact | 5,183 | 200 | Jikji index diagnostic | 0.3350 | 0.5400 | 0.6100 | 0.4205 |
+| NFCorpus | 3,633 | 200 | raw lexical diagnostic | 0.3100 | 0.5100 | 0.5800 | 0.3940 |
+| NFCorpus | 3,633 | 200 | Jikji index diagnostic | 0.3500 | 0.5750 | 0.6350 | 0.4507 |
+| ArguAna | 8,674 | 200 | raw lexical diagnostic | 0.0000 | 0.0700 | 0.1300 | 0.0338 |
+| ArguAna | 8,674 | 200 | Jikji index diagnostic | 0.0000 | 0.3950 | 0.5450 | 0.1743 |
 
 HippoCamp public no-leak deterministic check:
 
-```text
-Dataset           Mode   Cases  Hit@1   Hit@5   Hit@10  MRR
-HippoCamp public  raw    18     0.6667  0.7778  0.8889  0.7238
-HippoCamp public  jikji  18     0.6111  0.8333  0.9444  0.6935
-```
+| Dataset | Mode | Cases | Hit@1 | Hit@5 | Hit@10 | MRR |
+|---|---:|---:|---:|---:|---:|---:|
+| HippoCamp public | raw lexical diagnostic | 18 | 0.6667 | 0.7778 | 0.8889 | 0.7238 |
+| HippoCamp public | Jikji index diagnostic | 18 | 0.6111 | 0.8333 | 0.9444 | 0.6935 |
 
 MIRACL-VISION public multilingual document-file check after CJK-aware indexing
 and `brief` support:
 
-```text
-Dataset                    Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Seconds
-MIRACL-VISION ko/en/ja/fr  raw    80     0.6125  0.7250  0.7875  0.8875  0.6962  13.760
-MIRACL-VISION ko/en/ja/fr  jikji  80     0.6875  0.9000  0.9250  0.9750  0.7903   7.421
-```
+| Dataset | Mode | Cases | Hit@1 | Hit@3 | Hit@5 | Hit@10 | MRR | Seconds |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| MIRACL-VISION ko/en/ja/fr | raw lexical diagnostic | 80 | 0.6125 | 0.7250 | 0.7875 | 0.8875 | 0.6962 | 13.760 |
+| MIRACL-VISION ko/en/ja/fr | Jikji index diagnostic | 80 | 0.6875 | 0.9000 | 0.9250 | 0.9750 | 0.7903 | 7.421 |
 
 EDiTh / Véracier Industries bounded enterprise-PDF check:
 
-```text
-Dataset           Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  SetR@5  MRR     Seconds
-EDiTh PDF subset  raw    3      0.3333  0.6667  0.6667  0.6667  0.4000  0.4444  0.009
-EDiTh PDF subset  jikji  3      0.3333  1.0000  1.0000  1.0000  0.6667  0.6667  0.024
-```
+| Dataset | Mode | Cases | Hit@1 | Hit@3 | Hit@5 | Hit@10 | SetR@5 | MRR | Seconds |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EDiTh PDF subset | raw lexical diagnostic | 3 | 0.3333 | 0.6667 | 0.6667 | 0.6667 | 0.4000 | 0.4444 | 0.009 |
+| EDiTh PDF subset | Jikji index diagnostic | 3 | 0.3333 | 1.0000 | 1.0000 | 1.0000 | 0.6667 | 0.6667 | 0.024 |
 
 Reproducible commands:
 

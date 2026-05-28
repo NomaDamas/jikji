@@ -32,21 +32,19 @@ only selected PDFs from the public archive instead of storing the 1.5GB tarball.
 The stream is bounded by `--max-download-bytes` and `--no-docs` can be used for
 metadata/eval-set inspection without running a corpus benchmark.
 
-Most recent bounded result on this workstation:
+Actual Hermes agent on the same subset is the primary comparison:
 
-```text
-Dataset           Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  SetR@5  MRR
-EDiTh PDF subset  raw    3      0.3333  0.6667  0.6667  0.6667  0.4000  0.4444
-EDiTh PDF subset  jikji  3      0.3333  1.0000  1.0000  1.0000  0.6667  0.6667
-```
+| Agent mode | Cases | Hit@5 | Hit@10 | Seconds | Avg sec/case |
+|---|---:|---:|---:|---:|---:|
+| raw Hermes | 3 | 1.0000 | 1.0000 | 152.777 | 50.926 |
+| Hermes + Jikji | 3 | 1.0000 | 1.0000 | 120.852 | 40.284 |
 
-Actual Hermes agent on the same subset:
+Most recent bounded deterministic diagnostic on this workstation. This is secondary evidence only.
 
-```text
-Mode          Cases  Hit@5   Hit@10  Seconds  Avg sec/case
-raw           3      1.0000  1.0000  152.777  50.926
-hermes+jikji  3      1.0000  1.0000  120.852  40.284
-```
+| Dataset | Mode | Cases | Hit@1 | Hit@3 | Hit@5 | Hit@10 | SetR@5 | MRR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| EDiTh PDF subset | raw lexical diagnostic | 3 | 0.3333 | 0.6667 | 0.6667 | 0.6667 | 0.4000 | 0.4444 |
+| EDiTh PDF subset | Jikji index diagnostic | 3 | 0.3333 | 1.0000 | 1.0000 | 1.0000 | 0.6667 | 0.6667 |
 
 Interpretation: EDiTh is more realistic than Markdown-only corpora for Jikji's
 parser/cache/route-layer purpose, but the current bounded file-list subset is
