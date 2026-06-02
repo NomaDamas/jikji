@@ -9,6 +9,7 @@ chunk retrieval tasks.
 | Benchmark | Best use | Caveat |
 |---|---|---|
 | Korean public-data messy-folder benchmark | Korean spreadsheet/document-name/content search with human-ish noisy folders and actual Hermes raw vs Jikji comparison | Current builder uses Seoul Data Hub public XLSX fallback when data.go.kr is unavailable; XLSX-heavy |
+| Hard mixed KOGL public-document benchmark | High-difficulty PDF/HWP/HWPX file discovery in deep messy folders with train/valid/test and Hermes sample | KOGL resource attachments are thematically clustered around public works/copyright; multi-clue failures remain hardest |
 | Workspace-Bench-Lite file-discovery | Workspace exploration, cross-file task context, and task-supporting file discovery | Jikji adapter measures file discovery only, not full output-generation Workspace-Bench scoring |
 | HippoCamp | Personal-computer style file search and agent QA | Full dataset is large; some tasks evaluate final QA more than retrieval |
 | EDiTh / Véracier Industries | Enterprise PDFs, scanned/searchable/mixed formats, multilingual, multi-file answers | Public archive is ~1.5GB and only a few answer-key questions are explicit file-list retrieval |
@@ -17,6 +18,40 @@ chunk retrieval tasks.
 | SDS KoPub VDR | Korean public PDF page-level retrieval | Corpus parquet is very large; needs page-to-file conversion |
 | UniDoc-Bench | Large PDF page/QA stress test | Multimodal/page-centric; needs file-level conversion |
 | docx-corpus | DOCX parser/indexing scale stress | No retrieval QA; needs synthetic/label-derived eval |
+
+## Hard mixed KOGL public-document run
+
+This is the current hardest public local-file discovery benchmark for Jikji. It
+downloads 180 public KOGL resource attachments, including 150 PDF, 27 HWP, 1
+HWPX, 1 PPTX, and 1 XLSX file; splits them into train/valid/test; and
+materializes deep messy folders with clutter notes.
+
+```bash
+jikji hardbench-suite .benchmarks/hard_mixed_kogl_20260603_v3 \
+  --target-docs 180 --max-data-idx 180 --cases 240 --top-k 10 --json
+```
+
+Final held-out deterministic test:
+
+```text
+Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Sec    Sec/case
+-----  -----  ------  ------  ------  ------  ------  -----  --------
+raw       72  0.2222  0.4722  0.5694  0.6528  0.3656  0.689    0.0096
+Jikji     72  0.7083  0.8750  0.8889  0.9028  0.7939  2.540    0.0353
+```
+
+Actual Hermes sample on 8 held-out test cases:
+
+```text
+Agent mode       Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/case
+---------------  -----  ------  ------  ------  ------  -------  ------------
+raw Hermes           8  0.8750  0.8750  0.8750  0.8750  570.060        71.257
+Hermes + Jikji       8  1.0000  1.0000  1.0000  1.0000  330.405        41.301
+```
+
+Train/valid drove only generic improvements: folder/path-context scoring,
+original-document vs memo/link decoy discounting, format-mismatch discounting,
+and benchmark query-quality filtering. See `docs/hardbench-benchmark.md`.
 
 ## Workspace-Bench-Lite file-discovery run
 

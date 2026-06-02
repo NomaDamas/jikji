@@ -966,3 +966,25 @@ def test_workspacebench_eval_case_rejects_unsafe_manifest_paths():
 
     with pytest.raises(ValueError, match="unsafe Workspace-Bench path"):
         build_eval_case("task_101", metadata)
+
+
+def test_hardbench_token_filter_rejects_parser_noise():
+    from jikji.hardbench import _tokens
+
+    text = "상세정보 츀츥츥츥 겭삹겳 theusercanfreelyusethepublicworkregardlessofitscommercialusewithoutfee 계약서"
+
+    tokens = _tokens(text, min_len=2)
+
+    assert "상세정보" in tokens
+    assert "계약서" in tokens
+    assert "츀츥츥츥" not in tokens
+    assert "겭삹겳" not in tokens
+    assert "theusercanfreelyusethepublicworkregardlessofitscommercialusewithoutfee" not in tokens
+
+
+def test_hardbench_doc_type_label_is_natural_korean():
+    from jikji.hardbench import _doc_type_label
+
+    assert _doc_type_label("training") == "교육·워크숍 발표자료"
+    assert _doc_type_label("manual") == "지침·매뉴얼·해설서"
+    assert _doc_type_label("unknown") == "참고자료"

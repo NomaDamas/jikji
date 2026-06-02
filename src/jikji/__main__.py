@@ -21,6 +21,7 @@ from .eval import (
     run_eval,
     search,
 )
+from .hardbench import build_hard_benchmark, run_hard_benchmark_suite
 from .hermes_bench import install_hermes_skill, run_hermes_benchmark
 from .hippocamp import fetch_subset, import_eval_set, run_benchmark, run_suite
 from .holdout_eval import generate_holdout_eval_set
@@ -1021,6 +1022,83 @@ def cmd_workspacebench_suite(args) -> int:
     return 0
 
 
+def cmd_hardbench_build(args) -> int:
+    result = build_hard_benchmark(
+        Path(args.dest),
+        target_docs=args.target_docs,
+        max_data_idx=args.max_data_idx,
+        max_cases_per_split=args.cases,
+        seed=args.seed,
+        max_file_bytes=args.max_file_bytes,
+    )
+    payload = {
+        "dest": str(result.dest),
+        "train_root": str(result.train_root),
+        "valid_root": str(result.valid_root),
+        "test_root": str(result.test_root),
+        "train_eval_set": str(result.train_eval_set_path),
+        "valid_eval_set": str(result.valid_eval_set_path),
+        "eval_set": str(result.eval_set_path),
+        "manifest": str(result.manifest_path),
+        "docs_downloaded": result.docs_downloaded,
+        "train_docs": result.train_docs,
+        "valid_docs": result.valid_docs,
+        "test_docs": result.test_docs,
+        "eval_cases": result.eval_cases,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print("Hard mixed-document benchmark built")
+        print(f"- docs={result.docs_downloaded} train/valid/test={result.train_docs}/{result.valid_docs}/{result.test_docs}")
+        print(f"- test_eval={result.eval_set_path}")
+    return 0
+
+
+def cmd_hardbench_suite(args) -> int:
+    result = run_hard_benchmark_suite(
+        Path(args.dest),
+        target_docs=args.target_docs,
+        max_data_idx=args.max_data_idx,
+        max_cases_per_split=args.cases,
+        seed=args.seed,
+        top_k=args.top_k,
+        max_file_bytes=args.max_file_bytes,
+    )
+    payload = {
+        "report": str(result.report_path),
+        "build": {
+            "dest": str(result.build.dest),
+            "train_root": str(result.build.train_root),
+            "valid_root": str(result.build.valid_root),
+            "test_root": str(result.build.test_root),
+            "train_eval_set": str(result.build.train_eval_set_path),
+            "valid_eval_set": str(result.build.valid_eval_set_path),
+            "eval_set": str(result.build.eval_set_path),
+            "manifest": str(result.build.manifest_path),
+            "docs_downloaded": result.build.docs_downloaded,
+            "train_docs": result.build.train_docs,
+            "valid_docs": result.build.valid_docs,
+            "test_docs": result.build.test_docs,
+            "eval_cases": result.build.eval_cases,
+        },
+        "prepare_seconds": result.prepare_seconds,
+        "reports": {split: str(path) for split, path in result.reports.items()},
+        "metrics": result.metrics,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"Hard mixed-document suite complete: {result.report_path}")
+        for split, split_metrics in result.metrics.items():
+            for mode, metrics in split_metrics.items():
+                print(
+                    f"- {split}/{mode}: cases={metrics.get('cases')} hit@5={metrics.get('hit_at_5')} "
+                    f"hit@10={metrics.get('hit_at_10')} seconds={metrics.get('seconds')}"
+                )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jikji", description="Prepare local files as agent-readable knowledge maps.")
     parser.add_argument("--version", action="version", version=f"jikji {__version__}")
@@ -1326,6 +1404,33 @@ def main(argv: list[str] | None = None) -> int:
     p_workspacebench_suite.add_argument("--max-total-bytes", type=int, default=DEFAULT_MAX_TOTAL_BYTES)
     p_workspacebench_suite.add_argument("--json", action="store_true")
     p_workspacebench_suite.set_defaults(func=cmd_workspacebench_suite)
+
+    p_hardbench_build = sub.add_parser(
+        "hardbench-build",
+        help="build a large hard mixed PDF/HWP public-document benchmark corpus",
+    )
+    p_hardbench_build.add_argument("dest")
+    p_hardbench_build.add_argument("--target-docs", type=int, default=180)
+    p_hardbench_build.add_argument("--max-data-idx", type=int, default=180)
+    p_hardbench_build.add_argument("--cases", type=int, default=240)
+    p_hardbench_build.add_argument("--seed", type=int, default=20260603)
+    p_hardbench_build.add_argument("--max-file-bytes", type=int, default=80 * 1024 * 1024)
+    p_hardbench_build.add_argument("--json", action="store_true")
+    p_hardbench_build.set_defaults(func=cmd_hardbench_build)
+
+    p_hardbench_suite = sub.add_parser(
+        "hardbench-suite",
+        help="build and run hard mixed-document benchmark diagnostics",
+    )
+    p_hardbench_suite.add_argument("dest")
+    p_hardbench_suite.add_argument("--target-docs", type=int, default=180)
+    p_hardbench_suite.add_argument("--max-data-idx", type=int, default=180)
+    p_hardbench_suite.add_argument("--cases", type=int, default=240)
+    p_hardbench_suite.add_argument("--seed", type=int, default=20260603)
+    p_hardbench_suite.add_argument("--top-k", type=int, default=10)
+    p_hardbench_suite.add_argument("--max-file-bytes", type=int, default=80 * 1024 * 1024)
+    p_hardbench_suite.add_argument("--json", action="store_true")
+    p_hardbench_suite.set_defaults(func=cmd_hardbench_suite)
 
     args = parser.parse_args(argv)
     if args.cmd is None:

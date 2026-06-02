@@ -1029,6 +1029,45 @@ def _is_duplicate_query(query: str) -> bool:
     )
 
 
+def _is_folder_context_query(query: str) -> bool:
+    compact = re.sub(r"\s+", "", query or "").casefold()
+    return "/" in (query or "") or any(
+        needle in compact
+        for needle in (
+            "폴더",
+            "경로",
+            "아래",
+            "안에",
+            "정리전",
+            "검토중",
+            "임시보관",
+            "공유드라이브",
+            "팀자료실",
+            "내문서",
+            "받은자료",
+            "folder",
+            "path",
+            "directory",
+        )
+    )
+
+
+def _is_original_document_query(query: str) -> bool:
+    compact = re.sub(r"\s+", "", query or "").casefold()
+    return any(
+        needle in compact
+        for needle in (
+            "원본",
+            "문서",
+            "자료",
+            "파일",
+            "document",
+            "sourcefile",
+            "original",
+        )
+    )
+
+
 def _quoted_query_terms(query: str) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
@@ -1093,6 +1132,8 @@ def _score_map(query: str, row: dict, *, idf: dict[str, float] | None = None) ->
     query_doc_types = _query_document_types(query)
     filename_query = _is_filename_query(query)
     duplicate_query = _is_duplicate_query(query)
+    folder_context_query = _is_folder_context_query(query)
+    original_document_query = _is_original_document_query(query)
     filename_anchors = _query_filename_anchors(query) if (filename_query or duplicate_query) else []
     format_mismatch = False
     ext = str(card.get("ext") or "").lower()
@@ -1110,6 +1151,13 @@ def _score_map(query: str, row: dict, *, idf: dict[str, float] | None = None) ->
     intents = [str(x) for x in (card.get("intent_tags") or [])]
     evidence_previews = [str(x) for x in (card.get("evidence_previews") or [])]
     map_text = str(row.get("_map_all_text") or "").casefold()
+    folder_text = " ".join(str(x) for x in (card.get("folder_terms") or []) + (card.get("folder_roles") or [])).casefold()
+    path_lookup_text = " ".join([
+        path_text,
+        folder_text,
+        " ".join(str(x) for x in (card.get("path_terms") or [])),
+        " ".join(str(x) for x in (card.get("name_terms") or [])),
+    ]).casefold()
 
     score = 0.0
     reasons: list[str] = []
@@ -1168,6 +1216,11 @@ def _score_map(query: str, row: dict, *, idf: dict[str, float] | None = None) ->
             token_score += 18 * rare
         if token in map_text:
             token_score += 5 * rare
+        if token in path_lookup_text:
+            # Folder/path clues are structural evidence. They are especially
+            # important for local-agent discovery tasks where the user often
+            # remembers "that folder under shared drive" rather than content.
+            token_score += (34 if folder_context_query else 11) * rare
         if token_score:
             score += token_score * mult
             if token not in matched_terms and is_original:
@@ -1181,7 +1234,9 @@ def _score_map(query: str, row: dict, *, idf: dict[str, float] | None = None) ->
         if term in name_text:
             term_score += 420 if filename_query else 180
         elif term in path_text:
-            term_score += 300 if filename_query else 130
+            term_score += 300 if filename_query else (240 if folder_context_query else 130)
+        if term in path_lookup_text:
+            term_score += 160 if folder_context_query else 45
         if term in evidence_text:
             term_score += 90
         if term in content_text:
@@ -1221,12 +1276,26 @@ def _score_map(query: str, row: dict, *, idf: dict[str, float] | None = None) ->
     query_raw = [t.casefold() for t in _tokens_from_text(query, limit=64) if t.casefold() not in _STOPWORDS]
     for left, right in zip(query_raw, query_raw[1:], strict=False):
         phrase = f"{left} {right}"
+        slash_phrase = f"{left}/{right}"
         if phrase in phrase_text:
             score += 80
             reasons.append("map-phrase")
         elif phrase in evidence_text:
             score += 35
             reasons.append("evidence-phrase")
+        if folder_context_query and (phrase in path_lookup_text or slash_phrase in path_lookup_text):
+            score += 150
+            reasons.append("path-phrase")
+
+    if folder_context_query:
+        path_hits = sum(1 for token in original_tokens if token and token in path_lookup_text)
+        folder_hits = sum(1 for token in original_tokens if token and token in folder_text)
+        if path_hits >= 2:
+            score += 120 + 45 * path_hits + 20 * folder_hits
+            reasons.append("folder-context-path")
+        elif path_hits == 1:
+            score += 35
+            reasons.append("folder-context-token")
 
     best_chunk_score = 0.0
     best_evidence = ""
@@ -1276,7 +1345,10 @@ def _score_map(query: str, row: dict, *, idf: dict[str, float] | None = None) ->
         # Bounded multiplicative discount: preserves strong filename/body
         # evidence while still preferring the requested extension when
         # otherwise comparable.
-        score *= 0.42
+        score *= 0.24
+    if original_document_query and ext in {".txt", ".md"} and re.search(r"(메모|memo|링크|link|shortcut)", name_text):
+        score *= 0.18
+        reasons.append("note-decoy-discount")
 
     return score, reasons, matched_terms[:12], matched_intents[:8]
 

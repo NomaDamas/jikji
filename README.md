@@ -88,6 +88,15 @@ jikji hermes-bench .benchmarks/publicdata_agent_bench/run_20260529/corpus/test \
   --modes raw,jikji --cases 18 --candidate-top-k 10 \
   --skills jikji --yolo --json
 
+
+# Hard mixed public-document benchmark: PDF/HWP/HWPX in messy folders
+jikji hardbench-suite .benchmarks/hard_mixed_kogl_20260603_v3 \
+  --target-docs 180 --max-data-idx 180 --cases 240 --top-k 10 --json
+jikji hermes-bench .benchmarks/hard_mixed_kogl_20260603_v3/corpus/test \
+  --eval-set .benchmarks/hard_mixed_kogl_20260603_v3/eval/hardbench_test_eval.jsonl \
+  --modes raw,jikji --cases 8 --candidate-top-k 10 \
+  --skills jikji --yolo --json
+
 # Workspace-Bench-Lite file-discovery adaptation
 jikji workspacebench-suite .benchmarks/workspacebench_lite_jikji/run_20260602 \
   --max-tasks 12 --top-k 10 --json
@@ -177,6 +186,29 @@ This EDiTh run is intentionally small because the public archive is large and
 the answer key has only a few explicit file-list retrieval questions, but it is
 closer to Jikji's target than Markdown-only corpora: real PDF files,
 searchable/scanned/mixed formats, multiple languages, and multi-file answers.
+
+
+Hard mixed public-document benchmark: 180 KOGL public attachments were downloaded
+and split into train/valid/test. The corpus includes 150 PDF, 27 HWP, 1 HWPX, 1
+PPTX, and 1 XLSX file, then places them into deep messy folders with clutter
+notes. Train/valid failures drove folder/path scoring and decoy-note handling;
+the final test set stayed held out.
+
+```text
+Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Sec    Sec/case
+-----  -----  ------  ------  ------  ------  ------  -----  --------
+raw       72  0.2222  0.4722  0.5694  0.6528  0.3656  0.689    0.0096
+Jikji     72  0.7083  0.8750  0.8889  0.9028  0.7939  2.540    0.0353
+```
+
+Actual Hermes sanity sample on 8 held-out test cases:
+
+```text
+Agent mode       Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/case
+---------------  -----  ------  ------  ------  ------  -------  ------------
+raw Hermes           8  0.8750  0.8750  0.8750  0.8750  570.060        71.257
+Hermes + Jikji       8  1.0000  1.0000  1.0000  1.0000  330.405        41.301
+```
 
 Workspace-Bench-Lite is relevant to Jikji because it stresses workspace
 exploration and task-supporting file discovery. Jikji's adapter does **not**
@@ -285,7 +317,7 @@ Validation commands for this snapshot:
 ```
 
 Result on 2026-06-02 after the public benchmark additions: `ruff` passed,
-`pytest` passed with 42 tests, and `compileall` passed.
+`pytest` passed with 44 tests, and `compileall` passed.
 
 ## Content extraction coverage
 
@@ -334,6 +366,7 @@ python3 -m venv .venv
 - Public benchmark catalog: `docs/public-benchmark-catalog.md`
 - Korean public-data agent benchmark: `docs/publicdata-agent-benchmark.md`
 - Workspace-Bench-Lite adapter: `docs/workspacebench-benchmark.md`
+- Hard mixed public-document benchmark: `docs/hardbench-benchmark.md`
 - Generic skill template: `skills/jikji/SKILL.md`
 
 Jikji is separate from Folder1004:
