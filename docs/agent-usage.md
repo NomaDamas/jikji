@@ -10,6 +10,23 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
+Attach the skill once:
+
+```bash
+jikji agent-skill-install --agent all --json
+jikji skill-export --dest /path/to/unknown-agent/skills/jikji/SKILL.md --json
+```
+
+After that, a local agent should select the Jikji skill automatically whenever a
+user asks it to find local files, folders, filenames, metadata, or document
+contents under a bounded root. For agents without a skill directory, paste
+`jikji skill-export` output into their persistent instructions.
+
+The install command also starts a low-impact background prepare for common
+Documents/Downloads/Desktop/cloud roots that exist on the computer. Use
+`--foreground-prepare` to wait for it, `--prepare-root PATH` to add a root, or
+`--no-prepare` to skip post-install indexing.
+
 Agent flow:
 
 1. Start with the tool-first command. It auto-prepares an explicit root when

@@ -39,6 +39,8 @@ The stable commands are:
 
 ```bash
 jikji search /path/to/folder "query" [--top-k N] [--json]
+jikji agent-skill-install [--agent NAME|all] [--prepare-root PATH] [--foreground-prepare] [--no-prepare] [--json]
+jikji skill-export [--dest /agent/skills/jikji/SKILL.md] [--json]
 jikji prepare /path/to/folder [--json]
 jikji refresh /path/to/folder [--json]   # alias for prepare
 jikji map /path/to/folder

@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import time
 from collections import defaultdict
@@ -22,6 +21,7 @@ from typing import Any
 
 from .agent_brief import build_agent_brief_payload
 from .agent_index import AGENT_DIR_NAME, _atomic_write_text
+from .agent_skill_install import install_agent_skill
 from .eval import _path_fingerprints, _rank_for_expected, _read_jsonl, search
 
 
@@ -561,14 +561,5 @@ def run_hermes_benchmark(
 
 
 def install_hermes_skill(*, dest: Path | None = None, force: bool = False) -> HermesSkillInstallResult:
-    if dest is None:
-        dest = Path.home() / ".hermes" / "skills" / "productivity" / "jikji" / "SKILL.md"
-    dest = Path(dest).expanduser().resolve()
-    repo_skill = Path(__file__).resolve().parents[2] / "skills" / "jikji" / "SKILL.md"
-    if not repo_skill.exists():
-        raise FileNotFoundError(f"Cannot find repo skill file: {repo_skill}")
-    if dest.exists() and not force:
-        return HermesSkillInstallResult(dest, False, "already exists; pass --force to overwrite")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(repo_skill, dest)
-    return HermesSkillInstallResult(dest, True, "installed")
+    result = install_agent_skill("hermes", dest=dest, force=force)
+    return HermesSkillInstallResult(result.path, result.installed, result.message)

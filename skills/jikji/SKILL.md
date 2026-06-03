@@ -5,9 +5,23 @@ description: Use Jikji to find local files, folders, metadata, and parsed docume
 
 # Jikji Local File Discovery Skill
 
-Use this skill when the user asks you to find, identify, compare, or verify local
-files/documents under an explicit root path. Jikji is for agent discovery, not
-physical file organization.
+Use this skill in any coding, desktop, or local-agent environment when the user
+asks you to find, identify, compare, or verify local files, folders, filenames,
+metadata, or document contents under an explicit root path. Jikji is for agent
+discovery, not physical file organization.
+
+When this skill is installed, it should be selected automatically for local
+file/folder/document discovery requests in any agent that supports skills,
+persistent instructions, project memory, or prompt snippets. Do not wait for the
+user to mention "Jikji" if the task is plainly about finding local paths,
+filenames, metadata, or document contents under a bounded root.
+
+Trigger examples:
+
+- "Find the proposal PDF in this project."
+- "Search this drive for the document that mentions the vendor renewal."
+- "Which local file contains this phrase?"
+- "Locate the spreadsheet about last quarter's budget."
 
 ## Safety contract
 

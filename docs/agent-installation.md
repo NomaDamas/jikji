@@ -37,8 +37,55 @@ The reusable skill file lives here:
 skills/jikji/SKILL.md
 ```
 
-Copy or symlink that file into your agent's skill directory, or paste the
-"Agent protocol" below into the agent's system/project instructions.
+Install it with Jikji's installer. Once installed, the skill tells the agent to
+select Jikji automatically for local file/folder/document discovery under an
+explicit root; the user should not have to say "use Jikji" every time.
+
+Install for every supported local-agent surface:
+
+```bash
+jikji agent-skill-install --agent all --json
+```
+
+By default this installs the skill and starts one sequential background prepare
+job for common user-content roots that exist on the machine: Documents,
+Downloads, Desktop, and cloud-sync folders such as Google Drive, OneDrive,
+Dropbox, and iCloud Drive. The default number of roots is capped from local
+CPU/memory so installation does not overload smaller machines.
+
+Control post-install prepare:
+
+```bash
+jikji agent-skill-install --agent all --prepare-root /mnt/work-drive --json
+jikji agent-skill-install --agent all --foreground-prepare --json
+jikji agent-skill-install --agent all --no-prepare --json
+```
+
+Install for one agent:
+
+```bash
+jikji codex-skill-install --json      # Codex and OMX share the Codex skill dir
+jikji omx-skill-install --json
+jikji claude-skill-install --json
+jikji hermes-skill-install --json
+jikji opencode-skill-install --json
+jikji openclo-skill-install --json
+jikji nanoclo-skill-install --json
+```
+
+Install for any other coding/local agent:
+
+```bash
+# If the agent has a skill directory:
+jikji skill-export --dest /path/to/that-agent/skills/jikji/SKILL.md --json
+
+# If the agent only has persistent/project instructions:
+jikji skill-export
+```
+
+The exported `SKILL.md` is not tied to a named vendor. Any agent that loads
+Markdown skills or persistent instructions should then auto-select Jikji for
+bounded local file/folder/document discovery requests.
 
 Hermes convenience installer:
 
@@ -46,7 +93,7 @@ Hermes convenience installer:
 jikji hermes-skill-install --json
 ```
 
-Generic skill installation pattern:
+Generic fallback when an agent has a custom skill directory:
 
 ```bash
 mkdir -p ~/.local/share/agent-skills/jikji

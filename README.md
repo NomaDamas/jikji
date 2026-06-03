@@ -73,6 +73,42 @@ jikji search ~/Documents "파일명, 본문 단서, 문서 설명" --top-k 10 --
 | Confuses copies and decoys | Uses file cards and duplicate hints |
 | Burns exploratory turns | Verifies only the best candidates |
 
+
+## Real local agent benchmark
+
+On June 3, 2026, Jikji was tested with the same **Hermes Agent v0.10.0** in two modes:
+
+- `raw`: Hermes searches original folders/files without Jikji.
+- `jikji-fast`: Hermes receives Jikji's prebuilt map/search candidates first.
+
+Synthetic Office-body search, where clues lived inside DOCX/PPTX/XLSX files:
+
+```text
+mode          cases  hit@1   hit@10  avg_seconds
+raw           6      0.8333  0.8333  36.171
+jikji-fast    6      1.0000  1.0000  10.477
+jikji-direct  6      1.0000  1.0000   0.004
+```
+
+Large real local document root, anonymized: 20k+ files, 13k+ parser-target
+documents, HWP/HWPX/PDF/PPTX/XLSX-heavy. A balanced 12-case actual Hermes
+sample showed:
+
+```text
+mode          cases  hit@1   hit@10  avg_seconds
+raw           12     0.2500  0.2500  29.521
+jikji-fast    12     0.5833  0.7500  17.834
+jikji-direct  12     0.5833  0.7500   1.645
+```
+
+A 36-case deterministic diagnostic on the same root showed path-only search at
+`Hit@10 = 0.4167` and Jikji at `Hit@10 = 0.8056`.
+
+Takeaway: for messy local document folders with Korean HWP/HWPX, PDFs, Office
+files, copies, and folder-context clues, Jikji gave Hermes a substantially better
+starting map. Remaining weak spot: exact phrase-memory cases still need ranking
+and parser-coverage improvements.
+
 ## What Jikji creates
 
 ```text
@@ -101,11 +137,37 @@ Never move, rename, delete, or reorganize user files.
 Install the reusable skill instruction:
 
 ```bash
-# Generic: copy skills/jikji/SKILL.md into your agent's skill directory
+# Install into detected/common local-agent skill directories
+jikji agent-skill-install --agent all --json
 
-# Hermes convenience installer
+# Or install for one agent
+jikji codex-skill-install --json
+jikji claude-skill-install --json
 jikji hermes-skill-install --json
+jikji opencode-skill-install --json
+
+# Any other coding/local agent
+jikji skill-export --dest /path/to/that-agent/skills/jikji/SKILL.md --json
 ```
+
+Install also queues a low-impact background prepare for existing common
+user-content roots so the first agent search feels useful: Documents, Downloads,
+Desktop, and common cloud-sync folders such as Google Drive, OneDrive, Dropbox,
+and iCloud Drive. Jikji limits default roots from local CPU/memory and processes
+them sequentially. Add more roots, wait in the foreground, or disable
+post-install indexing:
+
+```bash
+jikji agent-skill-install --agent all --prepare-root /mnt/work-drive --json
+jikji agent-skill-install --agent all --foreground-prepare --json
+jikji agent-skill-install --agent all --no-prepare --json
+```
+
+After the skill is installed, local file/folder/document discovery requests should
+trigger Jikji automatically. The agent does not need the user to say "use Jikji";
+it should call `jikji brief ROOT "query" --top-k 10 --json` first when a bounded
+root is available. For agents without a formal skill system, paste the output of
+`jikji skill-export` into their persistent instructions or project memory.
 
 ## Core commands
 

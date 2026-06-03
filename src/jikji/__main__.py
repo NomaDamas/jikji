@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,12 @@ from pathlib import Path
 
 from .agent_brief import brief_markdown, build_agent_brief_payload
 from .agent_index import AGENT_DIR_NAME, build_agent_index
+from .agent_skill_install import (
+    CUSTOM_AGENT_NAMES,
+    expand_agent_selection,
+    install_agent_skill,
+    repo_skill_path,
+)
 from .beir import materialize_beir_dataset, run_beir_suite
 from .config import Config
 from .edith import edith_answer_summary, materialize_edith_dataset, run_edith_suite
@@ -483,6 +490,7 @@ def _maybe_start_background_refresh(args, root: Path) -> bool:
             start_new_session=True,
             close_fds=True,
         )
+        log.close()
         return True
     except OSError:
         return False
@@ -702,6 +710,357 @@ def cmd_hermes_skill_install(args) -> int:
     else:
         print(f"Hermes Jikji skill: {result.message} ({result.path})")
     return 0
+
+
+def cmd_agent_skill_install(args) -> int:
+    agents: list[str] = []
+    default_agents = ["custom"] if args.dest and not args.agent else ["all"]
+    for item in args.agent or default_agents:
+        agents.extend(expand_agent_selection(item))
+    seen: set[tuple[str, str]] = set()
+    results = []
+    for agent in agents:
+        dest = Path(args.dest).expanduser().resolve() if args.dest else None
+        if dest is not None and len(agents) > 1:
+            raise ValueError("--dest can only be used with one --agent value")
+        result = install_agent_skill(agent, dest=dest, force=args.force)
+        key = (result.agent, str(result.path))
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(result)
+    prepare_result = _prepare_after_skill_install(args)
+    payload = {
+        "installed_any": any(item.installed for item in results),
+        "results": [
+            {
+                "agent": item.agent,
+                "path": str(item.path),
+                "installed": item.installed,
+                "message": item.message,
+            }
+            for item in results
+        ],
+        "post_install_prepare": prepare_result,
+        "after_install_protocol": (
+            "When this SKILL.md is in an agent's skill directory, local file/document "
+            "discovery requests under an explicit root should trigger Jikji first: "
+            "jikji brief ROOT \"query\" --top-k 10 --json."
+        ),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        for item in results:
+            verb = "INSTALLED" if item.installed else "SKIPPED"
+            print(f"{verb} {item.agent}: {item.message} ({item.path})")
+        _print_post_install_prepare(prepare_result)
+        print("After install, file/document discovery should use Jikji first via the skill trigger.")
+    return 0
+
+
+def cmd_skill_export(args) -> int:
+    source = repo_skill_path()
+    if args.dest:
+        result = install_agent_skill("custom", dest=Path(args.dest).expanduser().resolve(), force=args.force)
+        prepare_result = _prepare_after_skill_install(args)
+        payload = {
+            "path": str(result.path),
+            "installed": result.installed,
+            "message": result.message,
+            "post_install_prepare": prepare_result,
+            "usage": "Point any coding/local agent's skill loader at this SKILL.md, or paste it into that agent's persistent instructions.",
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Jikji universal skill: {result.message} ({result.path})")
+            _print_post_install_prepare(prepare_result)
+        return 0
+    text = source.read_text(encoding="utf-8")
+    if args.json:
+        print(json.dumps({
+            "source": str(source),
+            "skill_markdown": text,
+            "usage": "Install this SKILL.md into any coding/local agent that supports Markdown skills or persistent prompt snippets.",
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(text)
+    return 0
+
+
+def cmd_post_install_prepare(args) -> int:
+    payload = {
+        "mode": "foreground",
+        "roots": _prepare_roots_foreground(
+            [Path(item).expanduser().resolve() for item in args.roots],
+            max_files=args.max_files,
+            parse_timeout=args.parse_timeout,
+        ),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        _print_post_install_prepare(payload)
+    return 0
+
+
+def _prepare_after_skill_install(args) -> dict[str, object]:
+    if getattr(args, "no_prepare", False):
+        return {"mode": "disabled", "roots": []}
+    raw_roots = list(getattr(args, "prepare_root", None) or [])
+    explicit_roots = bool(raw_roots)
+    roots = _select_post_install_roots(raw_roots, explicit_roots=explicit_roots)
+    if not roots:
+        return {"mode": "none", "roots": []}
+    if getattr(args, "foreground_prepare", False):
+        return {
+            "mode": "foreground",
+            "roots": _prepare_roots_foreground(
+                roots,
+                max_files=getattr(args, "max_files", 100_000),
+                parse_timeout=getattr(args, "parse_timeout", 5.0),
+            ),
+        }
+    return _start_background_post_install_prepare(
+        roots,
+        max_files=getattr(args, "max_files", 100_000),
+        parse_timeout=getattr(args, "parse_timeout", 5.0),
+    )
+
+
+def _select_post_install_roots(raw_roots: list[str], *, explicit_roots: bool) -> list[Path]:
+    candidates = [Path(item).expanduser() for item in raw_roots]
+    if not candidates:
+        candidates = _default_post_install_prepare_roots()
+    limit = len(candidates) if explicit_roots else min(len(candidates), _auto_post_install_root_limit())
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            root = candidate.expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if root in seen or not root.exists() or not root.is_dir():
+            continue
+        seen.add(root)
+        roots.append(root)
+        if len(roots) >= limit:
+            break
+    return roots
+
+
+def _prepare_roots_foreground(
+    roots: list[Path],
+    *,
+    max_files: int,
+    parse_timeout: float,
+) -> list[dict[str, object]]:
+    prepared: list[dict[str, object]] = []
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            prepared.append({"root": str(root), "ok": False, "error": "missing_or_not_directory"})
+            continue
+        cfg = Config()
+        cfg.max_files = max_files
+        cfg.parse_timeout_s = parse_timeout
+        try:
+            result = build_agent_index(root, cfg)
+            prepared.append({
+                "root": str(root),
+                "ok": True,
+                "index_dir": str(result.index_dir),
+                "agent_map": str(result.agent_map),
+                "files": result.files,
+                "folders": result.folders,
+                "docs_parsed": result.docs_parsed,
+                "docs_reused": result.docs_reused,
+                "docs_failed": result.docs_failed,
+                "deleted": result.deleted,
+            })
+        except Exception as exc:  # pragma: no cover - defensive install UX
+            prepared.append({"root": str(root), "ok": False, "error": str(exc)})
+    return prepared
+
+
+def _start_background_post_install_prepare(
+    roots: list[Path],
+    *,
+    max_files: int,
+    parse_timeout: float,
+) -> dict[str, object]:
+    log_dir = Path.home() / ".local" / "share" / "jikji" / "post_install"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+        log_path = log_dir / f"prepare_{stamp}.json"
+        log = log_path.open("ab")
+        cmd = [
+            sys.executable,
+            "-m",
+            "jikji.__main__",
+            "post-install-prepare",
+            *[str(root) for root in roots],
+            "--max-files",
+            str(max_files),
+            "--parse-timeout",
+            str(parse_timeout),
+            "--json",
+        ]
+        proc = subprocess.Popen(  # noqa: S603 - current Python module with explicit roots
+            cmd,
+            cwd=str(Path.home()),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+        log.close()
+        return {
+            "mode": "background",
+            "started": True,
+            "pid": proc.pid,
+            "log": str(log_path),
+            "roots": [{"root": str(root), "status": "queued"} for root in roots],
+            "policy": _post_install_load_policy(),
+        }
+    except OSError as exc:
+        return {
+            "mode": "background",
+            "started": False,
+            "error": str(exc),
+            "roots": [{"root": str(root), "status": "not_started"} for root in roots],
+            "policy": _post_install_load_policy(),
+        }
+
+
+def _auto_post_install_root_limit() -> int:
+    policy = _post_install_load_policy()
+    return int(policy["max_default_roots"])
+
+
+def _post_install_load_policy() -> dict[str, object]:
+    cpu_count = os.cpu_count() or 1
+    memory_gib = _memory_gib()
+    if cpu_count <= 2 or (memory_gib is not None and memory_gib <= 4):
+        max_roots = 2
+    elif cpu_count <= 4 or (memory_gib is not None and memory_gib <= 8):
+        max_roots = 3
+    else:
+        max_roots = 5
+    return {
+        "cpu_count": cpu_count,
+        "memory_gib": memory_gib,
+        "max_default_roots": max_roots,
+        "concurrency": 1,
+        "note": "post-install prepare runs sequentially in one background process",
+    }
+
+
+def _memory_gib() -> float | None:
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        if isinstance(pages, int) and isinstance(page_size, int):
+            return round((pages * page_size) / (1024 ** 3), 2)
+    except (AttributeError, OSError, ValueError):
+        return None
+    return None
+
+
+def _print_post_install_prepare(payload: dict[str, object]) -> None:
+    mode = payload.get("mode")
+    if mode == "disabled":
+        print("POST-INSTALL PREPARE disabled.")
+        return
+    if mode == "background":
+        if payload.get("started"):
+            print(f"POST-INSTALL PREPARE background pid={payload.get('pid')} log={payload.get('log')}")
+        else:
+            print(f"POST-INSTALL PREPARE not started: {payload.get('error')}")
+        for item in payload.get("roots", []):
+            if isinstance(item, dict):
+                print(f"QUEUED {item.get('root')}: {item.get('status')}")
+        return
+    for item in payload.get("roots", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("ok") is False:
+            print(f"PREPARE-SKIPPED {item['root']}: {item.get('error')}")
+        else:
+            print(
+                f"PREPARED {item['root']}: files={item.get('files')} "
+                f"folders={item.get('folders')} docs_failed={item.get('docs_failed')}"
+            )
+
+
+def _default_post_install_prepare_roots() -> list[Path]:
+    """Return common user-content roots for immediate post-install usefulness."""
+    home = Path.home()
+    candidates: list[Path] = []
+
+    def add(path: Path | str | None) -> None:
+        if not path:
+            return
+        candidates.append(Path(path).expanduser())
+
+    for env_name in ("USERPROFILE", "OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+        add(os.environ.get(env_name))
+
+    for rel in (
+        "Documents",
+        "Downloads",
+        "Desktop",
+        "문서",
+        "다운로드",
+        "바탕화면",
+        "Google Drive",
+        "GoogleDrive",
+        "My Drive",
+        "Dropbox",
+        "OneDrive",
+        "iCloud Drive",
+        "Library/Mobile Documents/com~apple~CloudDocs",
+    ):
+        add(home / rel)
+
+    candidates.extend(_xdg_user_dirs(home).values())
+
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if resolved in seen or not resolved.exists() or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        roots.append(resolved)
+    return roots
+
+
+def _xdg_user_dirs(home: Path) -> dict[str, Path]:
+    path = home / ".config" / "user-dirs.dirs"
+    wanted = {"XDG_DESKTOP_DIR", "XDG_DOWNLOAD_DIR", "XDG_DOCUMENTS_DIR"}
+    dirs: dict[str, Path] = {}
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return dirs
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key not in wanted:
+            continue
+        value = value.strip().strip('"').replace("$HOME", str(home))
+        if value:
+            dirs[key] = Path(value).expanduser()
+    return dirs
 
 
 def cmd_hippocamp_suite(args) -> int:
@@ -1304,6 +1663,79 @@ def main(argv: list[str] | None = None) -> int:
     p_hs.add_argument("--force", action="store_true")
     p_hs.add_argument("--json", action="store_true")
     p_hs.set_defaults(func=cmd_hermes_skill_install)
+
+    p_prep_bg = sub.add_parser("post-install-prepare", help=argparse.SUPPRESS)
+    p_prep_bg.add_argument("roots", nargs="+")
+    p_prep_bg.add_argument("--max-files", type=int, default=100_000)
+    p_prep_bg.add_argument("--parse-timeout", type=float, default=5.0)
+    p_prep_bg.add_argument("--json", action="store_true")
+    p_prep_bg.set_defaults(func=cmd_post_install_prepare)
+
+    p_asi = sub.add_parser(
+        "agent-skill-install",
+        help="install the Jikji auto-use skill for local agents",
+    )
+    p_asi.add_argument(
+        "--agent",
+        action="append",
+        default=[],
+        help=(
+            "agent target: hermes, codex, omx, claude, opencode, openclo, "
+            f"nanoclo, generic, {','.join(CUSTOM_AGENT_NAMES)}, or all"
+        ),
+    )
+    p_asi.add_argument(
+        "--dest",
+        default="",
+        help="explicit SKILL.md path for any/custom agent; only valid with one --agent",
+    )
+    p_asi.add_argument(
+        "--prepare-root",
+        action="append",
+        default=[],
+        help="queue this explicit root for post-install prepare; repeatable; defaults to common user document/download roots",
+    )
+    p_asi.add_argument("--no-prepare", action="store_true", help="install the skill without preparing any root")
+    p_asi.add_argument("--foreground-prepare", action="store_true", help="wait for post-install prepare instead of running it in the background")
+    p_asi.add_argument("--max-files", type=int, default=100_000, help="post-install prepare safety limit")
+    p_asi.add_argument("--parse-timeout", type=float, default=5.0, help="parser timeout for post-install prepare")
+    p_asi.add_argument("--force", action="store_true")
+    p_asi.add_argument("--json", action="store_true")
+    p_asi.set_defaults(func=cmd_agent_skill_install)
+
+    for name in ("codex", "omx", "claude", "opencode", "openclo", "nanoclo"):
+        p_agent_alias = sub.add_parser(
+            f"{name}-skill-install",
+            help=f"install the Jikji auto-use skill for {name}",
+        )
+        p_agent_alias.add_argument("--dest", default="")
+        p_agent_alias.add_argument("--prepare-root", action="append", default=[])
+        p_agent_alias.add_argument("--no-prepare", action="store_true")
+        p_agent_alias.add_argument("--foreground-prepare", action="store_true")
+        p_agent_alias.add_argument("--max-files", type=int, default=100_000)
+        p_agent_alias.add_argument("--parse-timeout", type=float, default=5.0)
+        p_agent_alias.add_argument("--force", action="store_true")
+        p_agent_alias.add_argument("--json", action="store_true")
+        p_agent_alias.set_defaults(func=cmd_agent_skill_install, agent=[name])
+
+    p_export = sub.add_parser(
+        "skill-export",
+        help="print or write the universal Jikji SKILL.md for any local agent",
+    )
+    p_export.add_argument("--dest", default="", help="write SKILL.md to an arbitrary agent skill path")
+    p_export.add_argument(
+        "--prepare-root",
+        action="append",
+        default=[],
+        help="queue this explicit root for post-install prepare after writing --dest; repeatable; defaults to common user document/download roots",
+    )
+    p_export.add_argument("--no-prepare", action="store_true", help="write --dest without preparing any root")
+    p_export.add_argument("--foreground-prepare", action="store_true")
+    p_export.add_argument("--max-files", type=int, default=100_000)
+    p_export.add_argument("--parse-timeout", type=float, default=5.0)
+    p_export.add_argument("--force", action="store_true")
+    p_export.add_argument("--json", action="store_true")
+    p_export.set_defaults(func=cmd_skill_export)
 
     p_suite = sub.add_parser("hippocamp-suite", help="run bounded multi-profile HippoCamp benchmark suite")
     p_suite.add_argument("dest")

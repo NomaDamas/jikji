@@ -617,6 +617,123 @@ def test_hermes_skill_install_to_explicit_dest(tmp_path):
     assert "Jikji" in dest.read_text(encoding="utf-8")
 
 
+def test_agent_skill_install_to_explicit_dest(tmp_path):
+    from jikji.agent_skill_install import install_agent_skill
+
+    dest = tmp_path / "codex" / "jikji" / "SKILL.md"
+    result = install_agent_skill("codex", dest=dest)
+
+    assert result.agent == "codex"
+    assert result.installed is True
+    assert dest.exists()
+    text = dest.read_text(encoding="utf-8")
+    assert "selected automatically" in text
+    assert "jikji brief" in text
+
+
+def test_agent_skill_install_cli_alias_to_explicit_dest(tmp_path, capsys):
+    from jikji.__main__ import main
+
+    dest = tmp_path / "claude" / "jikji" / "SKILL.md"
+
+    assert main(["claude-skill-install", "--dest", str(dest), "--no-prepare", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["installed_any"] is True
+    assert payload["results"][0]["agent"] == "claude"
+    assert dest.exists()
+
+
+def test_agent_skill_install_dest_only_treats_unknown_agent_as_custom(tmp_path, capsys):
+    from jikji.__main__ import main
+
+    dest = tmp_path / "unknown-agent" / "skills" / "jikji" / "SKILL.md"
+
+    assert main(["agent-skill-install", "--dest", str(dest), "--no-prepare", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["installed_any"] is True
+    assert payload["results"][0]["agent"] == "custom"
+    assert dest.exists()
+    assert "any coding" in dest.read_text(encoding="utf-8")
+
+
+def test_skill_export_prints_and_writes_universal_skill(tmp_path, capsys):
+    from jikji.__main__ import main
+
+    assert main(["skill-export"]) == 0
+    printed = capsys.readouterr().out
+    assert "Jikji Local File Discovery Skill" in printed
+    assert "any coding" in printed
+
+    dest = tmp_path / "agent" / "SKILL.md"
+    assert main(["skill-export", "--dest", str(dest), "--no-prepare", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["installed"] is True
+    assert dest.exists()
+
+
+def test_agent_skill_install_queues_background_prepare_for_explicit_root(tmp_path, capsys, monkeypatch):
+    from jikji import __main__ as cli
+
+    calls = []
+
+    class FakePopen:
+        pid = 12345
+
+        def __init__(self, cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            stdout = kwargs.get("stdout")
+            if stdout:
+                stdout.close()
+
+    root = tmp_path / "Documents"
+    root.mkdir()
+    (root / "brief.txt").write_text("post install prepare target", encoding="utf-8")
+    dest = tmp_path / "agent" / "SKILL.md"
+    monkeypatch.setattr(cli.subprocess, "Popen", FakePopen)
+
+    assert cli.main([
+        "agent-skill-install",
+        "--dest",
+        str(dest),
+        "--prepare-root",
+        str(root),
+        "--json",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["post_install_prepare"]["mode"] == "background"
+    assert payload["post_install_prepare"]["started"] is True
+    assert payload["post_install_prepare"]["roots"][0]["root"] == str(root.resolve())
+    assert calls
+    assert "post-install-prepare" in calls[0][0]
+
+
+def test_agent_skill_install_foreground_prepare_for_explicit_root(tmp_path, capsys):
+    from jikji.__main__ import main
+
+    root = tmp_path / "Downloads"
+    root.mkdir()
+    (root / "download-note.txt").write_text("foreground prepare marker", encoding="utf-8")
+    dest = tmp_path / "agent" / "SKILL.md"
+
+    assert main([
+        "agent-skill-install",
+        "--dest",
+        str(dest),
+        "--prepare-root",
+        str(root),
+        "--foreground-prepare",
+        "--json",
+    ]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["post_install_prepare"]["mode"] == "foreground"
+    assert payload["post_install_prepare"]["roots"][0]["ok"] is True
+    assert (root / ".jikji" / "search_index.sqlite").exists()
+
+
 def test_bench_iterate_records_requested_iterations(tmp_path, capsys):
     from jikji.__main__ import main
 
