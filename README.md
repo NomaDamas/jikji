@@ -1,5 +1,11 @@
 # Jikji
 
+<p align="center">
+  <a href="https://nomadamas.github.io/jikji/">
+    <img src="docs/jikji-readme-hero.svg" alt="Jikji — local file maps for AI agents" width="100%" />
+  </a>
+</p>
+
 **Agent-installable local file maps.** Jikji makes local files legible to AI agents without moving, renaming, or deleting the user's files.
 
 Local agents such as Claude Code, Codex, Hermes, OpenCode/OpenClone-style tools, or any CLI-capable assistant can install Jikji from GitHub and use one tool-first command to find files by filename, folder memory, metadata, or parsed document body text.
