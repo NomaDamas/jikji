@@ -1032,6 +1032,8 @@ def cmd_hardbench_build(args) -> int:
         seed=args.seed,
         max_file_bytes=args.max_file_bytes,
         difficulty=args.difficulty,
+        source_dir=Path(args.source_dir).expanduser().resolve() if args.source_dir else None,
+        max_total_bytes=args.max_total_bytes,
     )
     payload = {
         "dest": str(result.dest),
@@ -1048,6 +1050,8 @@ def cmd_hardbench_build(args) -> int:
         "test_docs": result.test_docs,
         "eval_cases": result.eval_cases,
         "difficulty": args.difficulty,
+        "source_dir": args.source_dir,
+        "max_total_bytes": args.max_total_bytes,
     }
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -1068,6 +1072,8 @@ def cmd_hardbench_suite(args) -> int:
         top_k=args.top_k,
         max_file_bytes=args.max_file_bytes,
         difficulty=args.difficulty,
+        source_dir=Path(args.source_dir).expanduser().resolve() if args.source_dir else None,
+        max_total_bytes=args.max_total_bytes,
     )
     payload = {
         "report": str(result.report_path),
@@ -1086,6 +1092,8 @@ def cmd_hardbench_suite(args) -> int:
             "test_docs": result.build.test_docs,
             "eval_cases": result.build.eval_cases,
             "difficulty": args.difficulty,
+            "source_dir": args.source_dir,
+            "max_total_bytes": args.max_total_bytes,
         },
         "prepare_seconds": result.prepare_seconds,
         "reports": {split: str(path) for split, path in result.reports.items()},
@@ -1427,6 +1435,8 @@ def main(argv: list[str] | None = None) -> int:
     p_hardbench_build.add_argument("--seed", type=int, default=20260603)
     p_hardbench_build.add_argument("--max-file-bytes", type=int, default=80 * 1024 * 1024)
     p_hardbench_build.add_argument("--difficulty", choices=("hard", "extreme"), default="hard")
+    p_hardbench_build.add_argument("--source-dir", default="", help="use pre-downloaded local public documents instead of crawling KOGL")
+    p_hardbench_build.add_argument("--max-total-bytes", type=int, default=0, help="cap selected source bytes when --source-dir is used; 0 means no cap")
     p_hardbench_build.add_argument("--json", action="store_true")
     p_hardbench_build.set_defaults(func=cmd_hardbench_build)
 
@@ -1442,6 +1452,8 @@ def main(argv: list[str] | None = None) -> int:
     p_hardbench_suite.add_argument("--top-k", type=int, default=10)
     p_hardbench_suite.add_argument("--max-file-bytes", type=int, default=80 * 1024 * 1024)
     p_hardbench_suite.add_argument("--difficulty", choices=("hard", "extreme"), default="hard")
+    p_hardbench_suite.add_argument("--source-dir", default="", help="use pre-downloaded local public documents instead of crawling KOGL")
+    p_hardbench_suite.add_argument("--max-total-bytes", type=int, default=0, help="cap selected source bytes when --source-dir is used; 0 means no cap")
     p_hardbench_suite.add_argument("--json", action="store_true")
     p_hardbench_suite.set_defaults(func=cmd_hardbench_suite)
 

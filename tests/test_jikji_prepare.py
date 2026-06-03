@@ -1068,3 +1068,29 @@ def test_hardbench_extreme_masks_filename_and_builds_decoy_queries():
         "weak_folder_memory",
         "multi_body_disambiguation",
     })
+
+
+def test_hardbench_local_source_sampler_balances_extensions(tmp_path):
+    from jikji.hardbench import _local_source_docs
+
+    source = tmp_path / "source"
+    (source / "a").mkdir(parents=True)
+    (source / "b").mkdir(parents=True)
+    for idx in range(4):
+        (source / "a" / f"doc{idx}.pdf").write_bytes(b"%PDF-1.4\n" + b"a" * 2048)
+    for idx in range(3):
+        (source / "b" / f"doc{idx}.hwp").write_bytes(b"\xd0\xcf\x11\xe0" + b"b" * 2048)
+    (source / "b" / "sheet.xlsx").write_bytes(b"PK\x03\x04" + b"c" * 2048)
+
+    docs = _local_source_docs(
+        source,
+        target_docs=5,
+        seed=123,
+        max_file_bytes=10_000,
+        max_total_bytes=0,
+    )
+
+    exts = {doc["ext"] for doc in docs}
+    assert len(docs) == 5
+    assert {".pdf", ".hwp", ".xlsx"}.issubset(exts)
+    assert all(doc["source_file"] for doc in docs)

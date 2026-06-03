@@ -133,3 +133,70 @@ jikji hermes-bench .benchmarks/hard_mixed_kogl_extreme_20260603_v2/corpus/test \
 Here `raw` is raw Hermes without Jikji. `jikji-fast` is Hermes with a prebuilt
 Jikji map/search candidate handoff; Hermes should choose from the ranked paths
 instead of spending turns on exploratory browsing.
+
+## Local pre-downloaded KOGL Type 1/openable benchmark
+
+When a large public-document folder already exists locally, use `--source-dir`
+to avoid crawling/downloading again:
+
+```bash
+jikji hardbench-suite .benchmarks/local_kogl_extreme_20260603_v1 \
+  --source-dir /home/cheol/projects/datasets/kogl_type1_openable_selected_latest \
+  --target-docs 600 --max-file-bytes 26214400 --max-total-bytes 5368709120 \
+  --cases 240 --top-k 10 --difficulty extreme --json
+```
+
+The 2026-06-03 local run sampled 600 documents from 20,461 local files
+(`122GB` source folder) without modifying the source folder. The materialized
+benchmark corpus is about `1.3GB`.
+
+```text
+Ext    Files
+-----  -----
+.pdf     161
+.hwp     161
+.hwpx    162
+.xlsx    104
+.docx     12
+```
+
+```text
+Split  Docs  Cases
+-----  ----  -----
+train   270    240
+valid    90    180
+test    240    240
+```
+
+Final deterministic result:
+
+```text
+Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Sec      Sec/case
+-----  -----  ------  ------  ------  ------  ------  -------  --------
+raw      240  0.0250  0.0333  0.0458  0.0583  0.0339   35.189    0.1466
+Jikji    240  0.3167  0.5125  0.6125  0.8125  0.4532  207.006    0.8625
+```
+
+Per-scenario Jikji test result:
+
+```text
+Scenario                   Cases  Hit@5   Hit@10
+-------------------------  -----  ------  ------
+body_phrase_no_filename       66  0.6818  0.9848
+decoy_note_resistant          63  0.6508  0.8095
+multi_body_disambiguation     55  0.8000  0.9273
+weak_folder_memory            56  0.3036  0.5000
+```
+
+Actual Hermes 4-case sample:
+
+```text
+Agent mode           Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/case
+-------------------  -----  ------  ------  ------  ------  -------  ------------
+raw Hermes               4  0.5000  0.7500  0.7500  0.7500  366.282        91.571
+Hermes + Jikji fast      4  0.2500  0.7500  0.7500  1.0000  157.014        39.254
+```
+
+This larger local benchmark is intentionally harder than the 180-document KOGL
+suite. It exposes current Jikji weaknesses, especially weak folder-memory cases,
+and is a better train/valid/test base for future map/search improvements.

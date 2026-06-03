@@ -98,6 +98,12 @@ jikji hermes-bench .benchmarks/hard_mixed_kogl_extreme_20260603_v2/corpus/test \
   --modes raw,jikji-fast --cases 4 --candidate-top-k 10 \
   --fast-max-turns 1 --skills jikji --yolo --json
 
+# Local pre-downloaded KOGL Type 1/openable document benchmark
+jikji hardbench-suite .benchmarks/local_kogl_extreme_20260603_v1 \
+  --source-dir /home/cheol/projects/datasets/kogl_type1_openable_selected_latest \
+  --target-docs 600 --max-file-bytes 26214400 --max-total-bytes 5368709120 \
+  --cases 240 --top-k 10 --difficulty extreme --json
+
 # Workspace-Bench-Lite file-discovery adaptation
 jikji workspacebench-suite .benchmarks/workspacebench_lite_jikji/run_20260602 \
   --max-tasks 12 --top-k 10 --json
@@ -212,6 +218,27 @@ Agent mode           Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/cas
 -------------------  -----  ------  ------  ------  ------  -------  ------------
 raw Hermes               4  0.5000  0.5000  0.5000  0.5000  415.444       103.861
 Hermes + Jikji fast      4  1.0000  1.0000  1.0000  1.0000   63.156        15.789
+```
+
+Local pre-downloaded KOGL Type 1/openable benchmark: 600 documents sampled from
+`/home/cheol/projects/datasets/kogl_type1_openable_selected_latest`, using
+generic filenames and decoy memo/link files. Extension mix: 161 PDF, 161 HWP,
+162 HWPX, 104 XLSX, 12 DOCX. Split: 270 train / 90 valid / 240 test documents.
+
+```text
+Mode   Cases  Hit@1   Hit@3   Hit@5   Hit@10  MRR     Sec      Sec/case
+-----  -----  ------  ------  ------  ------  ------  -------  --------
+raw      240  0.0250  0.0333  0.0458  0.0583  0.0339   35.189    0.1466
+Jikji    240  0.3167  0.5125  0.6125  0.8125  0.4532  207.006    0.8625
+```
+
+Actual Hermes 4-case sample on this larger local benchmark:
+
+```text
+Agent mode           Cases  Hit@1   Hit@3   Hit@5   Hit@10  Seconds  Avg sec/case
+-------------------  -----  ------  ------  ------  ------  -------  ------------
+raw Hermes               4  0.5000  0.7500  0.7500  0.7500  366.282        91.571
+Hermes + Jikji fast      4  0.2500  0.7500  0.7500  1.0000  157.014        39.254
 ```
 
 Workspace-Bench-Lite is relevant to Jikji because it stresses workspace

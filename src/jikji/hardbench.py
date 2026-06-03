@@ -32,6 +32,7 @@ DEFAULT_HARDBENCH_SEED = 20260603
 DEFAULT_ALLOWED_EXTENSIONS = (".pdf", ".hwp", ".hwpx", ".pptx", ".xlsx")
 HARDBENCH_LEAK_NAMES = ("eval", "metadata", "manifest.json", "source_downloads")
 HARDBENCH_DIFFICULTIES = ("hard", "extreme")
+LOCAL_SOURCE_EXTENSIONS = (".pdf", ".hwp", ".hwpx", ".pptx", ".xlsx", ".docx")
 
 _KOREAN_STOP = {
     "공공",
@@ -261,6 +262,89 @@ def _download_attachment(row: dict[str, Any], source_dir: Path, *, max_file_byte
         target.unlink(missing_ok=True)
         return None
     return target
+
+
+def _local_source_docs(
+    source_dir: Path,
+    *,
+    target_docs: int,
+    seed: int,
+    max_file_bytes: int,
+    max_total_bytes: int,
+    allowed_extensions: tuple[str, ...] = LOCAL_SOURCE_EXTENSIONS,
+) -> list[dict[str, Any]]:
+    """Sample diverse local public-document files for hardbench materialization."""
+    source_dir = Path(source_dir).expanduser().resolve()
+    if not source_dir.is_dir():
+        raise FileNotFoundError(f"hardbench source directory not found: {source_dir}")
+    allowed = {ext.lower() for ext in allowed_extensions}
+    buckets: dict[str, list[Path]] = {}
+    for path in source_dir.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        ext = path.suffix.lower()
+        if ext not in allowed:
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size < 1024 or size > max_file_bytes:
+            continue
+        buckets.setdefault(ext, []).append(path)
+    rng = random.Random(seed)
+    for paths in buckets.values():
+        rng.shuffle(paths)
+    selected: list[Path] = []
+    total_bytes = 0
+    exts = sorted(buckets, key=lambda ext: (len(buckets[ext]), ext))
+    cursor = {ext: 0 for ext in exts}
+    while len(selected) < target_docs and exts:
+        progressed = False
+        for ext in list(exts):
+            paths = buckets.get(ext) or []
+            while cursor[ext] < len(paths):
+                candidate = paths[cursor[ext]]
+                cursor[ext] += 1
+                try:
+                    size = candidate.stat().st_size
+                except OSError:
+                    continue
+                if max_total_bytes > 0 and total_bytes + size > max_total_bytes:
+                    continue
+                selected.append(candidate)
+                total_bytes += size
+                progressed = True
+                break
+            if cursor[ext] >= len(paths):
+                exts.remove(ext)
+            if len(selected) >= target_docs:
+                break
+        if not progressed:
+            break
+    docs: list[dict[str, Any]] = []
+    for idx, source in enumerate(selected, 1):
+        rel = source.relative_to(source_dir).as_posix()
+        ext = source.suffix.lower()
+        excerpt = extract_excerpt(source, max_chars=18_000, timeout=8.0)
+        title_parts = [source.stem, *source.relative_to(source_dir).parts[:3]]
+        row = {
+            "source": "local selected KOGL Type 1 openable document",
+            "source_url": "",
+            "source_relpath": rel,
+            "data_idx": idx,
+            "data_file_idx": idx,
+            "page_title": _clean_text(" / ".join(title_parts)),
+            "filename": source.name,
+            "ext": ext,
+            "license_note": "Local pre-downloaded KOGL Type 1/openable document sample; source files are copied into benchmark corpus.",
+            "source_file": str(source),
+            "bytes": source.stat().st_size,
+            "text_excerpt": excerpt,
+            "doc_type": _doc_type(" ".join([source.name, rel, excerpt])),
+        }
+        docs.append(row)
+    return docs
 
 
 def _tokens(text: str, *, min_len: int = 2) -> list[str]:
@@ -558,31 +642,46 @@ def build_hard_benchmark(
     seed: int = DEFAULT_HARDBENCH_SEED,
     max_file_bytes: int = 80 * 1024 * 1024,
     difficulty: str = "hard",
+    source_dir: Path | None = None,
+    max_total_bytes: int = 0,
 ) -> HardBenchBuildResult:
     dest = Path(dest).expanduser().resolve()
     if difficulty not in HARDBENCH_DIFFICULTIES:
         raise ValueError(f"unsupported hardbench difficulty: {difficulty}")
     dest.mkdir(parents=True, exist_ok=True)
-    source_dir = dest / "source_downloads"
-    source_dir.mkdir(parents=True, exist_ok=True)
-    rows = crawl_kogl_attachments(dest, max_data_idx=max_data_idx)
-    docs: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
-    for row in rows:
-        if len(docs) >= target_docs:
-            break
-        source = _download_attachment(row, source_dir, max_file_bytes=max_file_bytes)
-        if source is None:
-            failures.append({"filename": str(row.get("filename")), "reason": "download_or_signature_failed"})
-            continue
-        enriched = dict(row)
-        enriched["source_file"] = str(source)
-        enriched["bytes"] = source.stat().st_size
-        enriched["text_excerpt"] = extract_excerpt(source, max_chars=18_000, timeout=8.0)
-        enriched["doc_type"] = _doc_type(
-            " ".join([str(enriched.get("filename") or ""), str(enriched.get("page_title") or ""), str(enriched.get("text_excerpt") or "")])
+    if source_dir is not None:
+        docs = _local_source_docs(
+            source_dir,
+            target_docs=target_docs,
+            seed=seed,
+            max_file_bytes=max_file_bytes,
+            max_total_bytes=max_total_bytes,
         )
-        docs.append(enriched)
+        source_family = "local selected KOGL Type 1/openable documents"
+        source_url = str(Path(source_dir).expanduser().resolve())
+    else:
+        download_dir = dest / "source_downloads"
+        download_dir.mkdir(parents=True, exist_ok=True)
+        rows = crawl_kogl_attachments(dest, max_data_idx=max_data_idx)
+        docs = []
+        for row in rows:
+            if len(docs) >= target_docs:
+                break
+            source = _download_attachment(row, download_dir, max_file_bytes=max_file_bytes)
+            if source is None:
+                failures.append({"filename": str(row.get("filename")), "reason": "download_or_signature_failed"})
+                continue
+            enriched = dict(row)
+            enriched["source_file"] = str(source)
+            enriched["bytes"] = source.stat().st_size
+            enriched["text_excerpt"] = extract_excerpt(source, max_chars=18_000, timeout=8.0)
+            enriched["doc_type"] = _doc_type(
+                " ".join([str(enriched.get("filename") or ""), str(enriched.get("page_title") or ""), str(enriched.get("text_excerpt") or "")])
+            )
+            docs.append(enriched)
+        source_family = "KOGL public resource attachments"
+        source_url = "https://www.kogl.or.kr/edu/eduDataList.do"
     if len(docs) < 40:
         raise RuntimeError(f"Too few hardbench documents downloaded: {len(docs)}")
     splits = _split_docs(docs, seed=seed, difficulty=difficulty)
@@ -604,10 +703,12 @@ def build_hard_benchmark(
         eval_counts[split] = len(cases)
     manifest = dest / "manifest.json"
     _write_json(manifest, {
-        "source_family": "KOGL public resource attachments",
-        "source_url": "https://www.kogl.or.kr/edu/eduDataList.do",
+        "source_family": source_family,
+        "source_url": source_url,
         "seed": seed,
         "difficulty": difficulty,
+        "source_dir": str(Path(source_dir).expanduser().resolve()) if source_dir is not None else "",
+        "max_total_bytes": max_total_bytes,
         "target_docs": target_docs,
         "docs_downloaded": len(docs),
         "extension_counts": dict(Counter(str(doc.get("ext") or "") for doc in docs)),
@@ -650,6 +751,8 @@ def run_hard_benchmark_suite(
     top_k: int = 10,
     max_file_bytes: int = 80 * 1024 * 1024,
     difficulty: str = "hard",
+    source_dir: Path | None = None,
+    max_total_bytes: int = 0,
 ) -> HardBenchSuiteResult:
     build = build_hard_benchmark(
         dest,
@@ -659,6 +762,8 @@ def run_hard_benchmark_suite(
         seed=seed,
         max_file_bytes=max_file_bytes,
         difficulty=difficulty,
+        source_dir=source_dir,
+        max_total_bytes=max_total_bytes,
     )
     cfg = Config(include_hidden=False)
     cfg.max_files = 1_000_000
