@@ -5,7 +5,7 @@
 Local agents such as Claude Code, Codex, Hermes, OpenCode/OpenClone-style tools, or any CLI-capable assistant can install Jikji from GitHub and use one tool-first command to find files by filename, folder memory, metadata, or parsed document body text.
 
 ```bash
-git clone https://github.com/Cheol-H-Jeong/jikji.git
+git clone https://github.com/nomadamas/jikji.git
 cd jikji
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -26,6 +26,29 @@ Agent manual and promotion page:
 - [Local-agent search standard](docs/local-agent-search-standard.md)
 - [Promo webpage source](docs/jikji-value.html) and [GitHub Pages entry](docs/index.html)
 - [Hardbench benchmark report](docs/hardbench-benchmark.md)
+
+## What changes for agents
+
+```text
+AS-IS raw agent                    TO-BE agent + Jikji
+---------------------------------  ----------------------------------------
+Guess search terms repeatedly      Ask `jikji brief ROOT "query" --json`
+List/grep/open many folders        Receive ranked paths + evidence
+Re-parse PDF/HWP/Office documents  Reuse `.jikji/doc_text/` parser cache
+Lose time on decoys/duplicates     Use map cards, folder context, duplicates
+Spend many exploratory turns       Verify only the best candidates
+```
+
+## What Jikji creates
+
+```text
+000_JIKJI_AGENT_MAP.md      visible route guide at the root
+.jikji/search_index.sqlite  instant lexical/content/metadata search index
+.jikji/doc_text/            extracted text cache for PDF/HWP/HWPX/Office/etc.
+.jikji/file_cards.jsonl     per-file map cards, tags, parse status, evidence
+.jikji/folder_profile.jsonl folder roles and local context for navigation
+.jikji/agent_routes.md      safe fallback order for autonomous agents
+```
 
 ## Quick commands
 
@@ -128,7 +151,7 @@ jikji hermes-bench .benchmarks/hard_mixed_kogl_extreme_20260603_v2/corpus/test \
 
 # Local pre-downloaded KOGL Type 1/openable document benchmark
 jikji hardbench-suite .benchmarks/local_kogl_extreme_20260603_v1 \
-  --source-dir /home/cheol/projects/datasets/kogl_type1_openable_selected_latest \
+  --source-dir /path/to/public-documents \
   --target-docs 600 --max-file-bytes 26214400 --max-total-bytes 5368709120 \
   --cases 240 --top-k 10 --difficulty extreme --json
 jikji hermes-bench .benchmarks/local_kogl_extreme_20260603_v1/corpus/test \
@@ -255,7 +278,7 @@ Hermes + Jikji fast      4  1.0000  1.0000  1.0000  1.0000   63.156        15.78
 ```
 
 Local pre-downloaded KOGL Type 1/openable benchmark: 600 documents sampled from
-`/home/cheol/projects/datasets/kogl_type1_openable_selected_latest`, using
+a local public-document folder, using
 generic filenames and decoy memo/link files. Extension mix: 161 PDF, 161 HWP,
 162 HWPX, 104 XLSX, 12 DOCX. Split: 270 train / 90 valid / 240 test documents.
 

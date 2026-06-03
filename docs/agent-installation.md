@@ -10,7 +10,7 @@ or any local agent that can run CLI commands.
 ## 1. Install from GitHub
 
 ```bash
-git clone https://github.com/Cheol-H-Jeong/jikji.git
+git clone https://github.com/nomadamas/jikji.git
 cd jikji
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -158,8 +158,8 @@ sync folders. Run it per explicit root:
 
 ```bash
 jikji prepare /mnt/work-drive --json
-jikji prepare ~/GoogleDrive --json
-jikji brief ~/GoogleDrive "invoice from vendor in spring" --json
+jikji prepare ~/CloudDrive --json
+jikji brief ~/CloudDrive "invoice from vendor in spring" --json
 ```
 
 Do not default to scanning all drives. Ask for or infer a bounded root from the

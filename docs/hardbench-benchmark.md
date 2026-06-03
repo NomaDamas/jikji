@@ -141,7 +141,7 @@ to avoid crawling/downloading again:
 
 ```bash
 jikji hardbench-suite .benchmarks/local_kogl_extreme_20260603_v1 \
-  --source-dir /home/cheol/projects/datasets/kogl_type1_openable_selected_latest \
+  --source-dir /path/to/public-documents \
   --target-docs 600 --max-file-bytes 26214400 --max-total-bytes 5368709120 \
   --cases 240 --top-k 10 --difficulty extreme --json
 ```
