@@ -56,6 +56,12 @@ python3 -m venv .venv
 .venv/bin/jikji brief ~/Documents "contract pdf from last spring" --top-k 10 --json
 ```
 
+Image files are indexed with lightweight local metadata (format, dimensions, and
+selected EXIF datetime when available). OCR text for images and scanned PDFs is
+optional and local-only; install `tesseract` and confirm with
+`jikji doctor ROOT --json` (`image_support.ocr_active`) when you want image text
+to contribute to search.
+
 한국어 예시:
 
 ```bash

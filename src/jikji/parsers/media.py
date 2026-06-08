@@ -1,8 +1,9 @@
 """Optional local media parsers (OCR/transcription/metadata).
 
 No heavyweight dependency is required.  If local tools are installed, Jikji uses
-those tools with bounded output.  Images without OCR text return empty so camera
-EXIF does not pollute body search; audio can still expose ffprobe tags.
+those tools with bounded output.  Images always expose lightweight visual
+metadata (format/dimensions and selected datetime EXIF when available), while
+OCR text is appended only when a local ``tesseract`` binary is installed.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -18,6 +20,7 @@ log = logging.getLogger(__name__)
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp", ".gif"}
 _AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus", ".wma"}
+_EXIF_DATETIME_TAGS = ("DateTimeOriginal", "DateTimeDigitized", "DateTime")
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -56,29 +59,157 @@ def _run(cmd: list[str], *, timeout: float) -> str:
     return proc.stdout.strip()
 
 
+def image_ocr_available() -> bool:
+    """Return whether local image/PDF OCR can run via Tesseract."""
+    return shutil.which("tesseract") is not None
+
+
+def _format_from_suffix(path: Path) -> str:
+    ext = path.suffix.lower().lstrip(".")
+    if ext in {"jpg", "jpeg"}:
+        return "JPEG"
+    if ext:
+        return ext.upper()
+    return "image"
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    if not data.startswith(b"\xff\xd8"):
+        return None
+    sof_markers = {
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
+    }
+    idx = 2
+    while idx + 9 < len(data):
+        if data[idx] != 0xFF:
+            idx += 1
+            continue
+        while idx < len(data) and data[idx] == 0xFF:
+            idx += 1
+        if idx >= len(data):
+            break
+        marker = data[idx]
+        idx += 1
+        if marker in {0x01, *range(0xD0, 0xD9)}:
+            continue
+        if idx + 2 > len(data):
+            break
+        block_len = int.from_bytes(data[idx:idx + 2], "big")
+        if block_len < 2 or idx + block_len > len(data):
+            break
+        if marker in sof_markers and block_len >= 7:
+            height = int.from_bytes(data[idx + 3:idx + 5], "big")
+            width = int.from_bytes(data[idx + 5:idx + 7], "big")
+            if width > 0 and height > 0:
+                return width, height
+        idx += block_len
+    return None
+
+
+def _webp_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) < 30 or not (data.startswith(b"RIFF") and data[8:12] == b"WEBP"):
+        return None
+    chunk = data[12:16]
+    if chunk == b"VP8X" and len(data) >= 30:
+        width = int.from_bytes(data[24:27], "little") + 1
+        height = int.from_bytes(data[27:30], "little") + 1
+        return width, height
+    if chunk == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+        b0, b1, b2, b3 = data[21:25]
+        width = 1 + (((b1 & 0x3F) << 8) | b0)
+        height = 1 + (((b3 & 0x0F) << 10) | (b2 << 2) | ((b1 & 0xC0) >> 6))
+        return width, height
+    if chunk == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+        width = int.from_bytes(data[26:28], "little") & 0x3FFF
+        height = int.from_bytes(data[28:30], "little") & 0x3FFF
+        if width > 0 and height > 0:
+            return width, height
+    return None
+
+
+def _header_image_metadata(path: Path) -> dict[str, object]:
+    """Return format/dimensions from common image headers without dependencies."""
+    meta: dict[str, object] = {"format": _format_from_suffix(path)}
+    try:
+        with path.open("rb") as fh:
+            data = fh.read(65536)
+    except OSError as exc:
+        log.debug("image header read failed %s: %s", path, exc)
+        return meta
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n") and data[12:16] == b"IHDR":
+        meta["format"] = "PNG"
+        meta["width"] = int.from_bytes(data[16:20], "big")
+        meta["height"] = int.from_bytes(data[20:24], "big")
+    elif len(data) >= 10 and data[:6] in {b"GIF87a", b"GIF89a"}:
+        meta["format"] = "GIF"
+        meta["width"] = int.from_bytes(data[6:8], "little")
+        meta["height"] = int.from_bytes(data[8:10], "little")
+    elif len(data) >= 26 and data.startswith(b"BM"):
+        meta["format"] = "BMP"
+        try:
+            meta["width"] = struct.unpack_from("<i", data, 18)[0]
+            meta["height"] = abs(struct.unpack_from("<i", data, 22)[0])
+        except struct.error:
+            pass
+    elif dims := _jpeg_dimensions(data):
+        meta["format"] = "JPEG"
+        meta["width"], meta["height"] = dims
+    elif dims := _webp_dimensions(data):
+        meta["format"] = "WEBP"
+        meta["width"], meta["height"] = dims
+    return meta
+
+
 def _image_metadata(path: Path) -> list[str]:
+    fallback = _header_image_metadata(path)
     parts: list[str] = [f"# Image: {path.name}"]
     try:
         from PIL import ExifTags, Image  # type: ignore
     except ImportError:
+        image_format = str(fallback.get("format") or _format_from_suffix(path))
+        parts.append(f"Format: {image_format}")
+        width = fallback.get("width")
+        height = fallback.get("height")
+        if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+            parts.append(f"Dimensions: {width}x{height} pixels")
         return parts
     try:
         with Image.open(path) as image:
-            parts.append(f"Format: {image.format or path.suffix.lstrip('.').upper()}")
-            parts.append(f"Size: {image.width}x{image.height}")
-            parts.append(f"Mode: {image.mode}")
+            parts.append(f"Format: {image.format or fallback.get('format') or _format_from_suffix(path)}")
+            parts.append(f"Dimensions: {image.width}x{image.height} pixels")
+            parts.append(f"Color mode: {image.mode}")
+            frames = int(getattr(image, "n_frames", 1) or 1)
+            if frames > 1:
+                parts.append(f"Frames: {frames}")
             exif = image.getexif()
             if exif:
-                names = getattr(ExifTags, "TAGS", {})
-                for key, value in list(exif.items())[:40]:
-                    label = names.get(key, str(key))
-                    if label in {"MakerNote", "UserComment"}:
-                        continue
-                    text = str(value).strip()
-                    if text:
-                        parts.append(f"EXIF {label}: {text[:200]}")
+                tags = getattr(ExifTags, "TAGS", {})
+                wanted = {label: key for key, label in tags.items() if label in _EXIF_DATETIME_TAGS}
+                for label in _EXIF_DATETIME_TAGS:
+                    value = exif.get(wanted.get(label))
+                    if value:
+                        parts.append(f"EXIF {label}: {str(value).strip()[:80]}")
+                        break
     except Exception as exc:
         log.debug("image metadata failed %s: %s", path, exc)
+        image_format = str(fallback.get("format") or _format_from_suffix(path))
+        parts.append(f"Format: {image_format}")
+        width = fallback.get("width")
+        height = fallback.get("height")
+        if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+            parts.append(f"Dimensions: {width}x{height} pixels")
     return parts
 
 
@@ -95,19 +226,10 @@ def _ocr_image(path: Path, max_chars: int) -> str:
 
 
 def parse_image(path: Path, max_chars: int) -> str:
+    parts = _image_metadata(path)
     ocr = _ocr_image(path, max_chars)
-    if not ocr:
-        # Do not treat camera EXIF/dimensions as document body text.  Filename,
-        # extension, size, and timestamps are already indexed in file_index.jsonl.
-        return ""
-    parts = [f"# Image OCR: {path.name}"]
-    # Lightweight dimensions are useful context once OCR has proven this image
-    # contains text, but EXIF tags stay out of the body index to avoid noisy
-    # camera-brand matches across photo libraries.
-    for line in _image_metadata(path):
-        if line.startswith(("Format:", "Size:", "Mode:")):
-            parts.append(line)
-    parts.append("# OCR text\n" + ocr)
+    if ocr:
+        parts.append("# OCR text\n" + ocr)
     return "\n".join(parts)[:max_chars]
 
 

@@ -12,6 +12,18 @@ def _jsonl(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line]
 
 
+def _write_minimal_png(path: Path, *, width: int = 1, height: int = 1) -> None:
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR"
+        + width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + b"\x08\x02\x00\x00\x00"
+        + b"\x00\x00\x00\x00"
+        + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+
 def test_prepare_is_non_destructive_and_writes_jikji_artifacts(tmp_path):
     src = tmp_path / "기존" / "회의"
     src.mkdir(parents=True)
@@ -103,6 +115,8 @@ def test_doctor_json_reports_ok(tmp_path, capsys):
     assert report["ok"] is True
     assert report["errors"] == []
     assert report["manifest"]["search_index_schema_version"] == 2
+    assert report["image_support"]["metadata_indexing"] is True
+    assert isinstance(report["image_support"]["ocr_active"], bool)
 
 
 def test_clean_removes_only_jikji_artifacts(tmp_path, capsys):
@@ -867,6 +881,46 @@ def test_optional_media_parsers_do_not_require_external_tools(tmp_path):
 
     assert isinstance(parse_image(png, 1000), str)
     assert isinstance(parse_audio(wav, 1000), str)
+
+
+def test_image_parser_emits_metadata_without_tesseract(tmp_path, monkeypatch):
+    from jikji.parsers.media import parse_image
+
+    no_tools = tmp_path / "no-tools"
+    no_tools.mkdir()
+    monkeypatch.setenv("PATH", str(no_tools))
+    png = tmp_path / "diagram.png"
+    _write_minimal_png(png, width=1, height=1)
+
+    parsed = parse_image(png, 1000)
+
+    assert "# Image: diagram.png" in parsed
+    assert "Format: PNG" in parsed
+    assert "Dimensions: 1x1 pixels" in parsed
+    assert "# OCR text" not in parsed
+
+
+def test_prepare_searches_image_metadata_without_tesseract(tmp_path, monkeypatch, capsys):
+    from jikji.__main__ import main
+
+    no_tools = tmp_path / "no-tools"
+    no_tools.mkdir()
+    monkeypatch.setenv("PATH", str(no_tools))
+    image = tmp_path / "visual.png"
+    _write_minimal_png(image, width=13, height=21)
+
+    assert main(["prepare", str(tmp_path), "--json"]) == 0
+    capsys.readouterr()
+
+    rows = _jsonl(tmp_path / ".jikji" / "document_index.jsonl")
+    row = next(row for row in rows if row["path"] == "visual.png")
+    assert row["parse_status"] == "success"
+    text = (tmp_path / row["text_cache_path"]).read_text(encoding="utf-8")
+    assert "Dimensions: 13x21 pixels" in text
+
+    assert main(["search", str(tmp_path), "13x21 pixels", "--top-k", "1", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["candidates"][0]["path"] == "visual.png"
 
 
 def test_structured_parser_recall_edge_cases(tmp_path):
