@@ -237,6 +237,10 @@ Nested explicit roots are allowed but independent: each root owns only its own
 - dangling generated `sha256_*` cache artifacts are warned;
 - `non_destructive` is true.
 
+The doctor JSON also reports `image_support`: lightweight image metadata
+indexing is always active, while `image_support.ocr_active` shows whether a
+local `tesseract` binary is available for OCR on images/scanned PDFs.
+
 Exit codes:
 
 - `0`: no errors or warnings;

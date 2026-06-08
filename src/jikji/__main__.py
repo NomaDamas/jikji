@@ -247,6 +247,12 @@ def cmd_doctor(args) -> int:
         read_jsonl(rel)
 
     doc_rows = read_jsonl(".jikji/document_index.jsonl")
+    image_doc_count = sum(
+        1
+        for row in doc_rows
+        if str(row.get("ext") or "").lower()
+        in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp", ".gif"}
+    )
     live_hashes: set[str] = set()
     for row in doc_rows:
         sha = row.get("sha256") or ""
@@ -271,6 +277,14 @@ def cmd_doctor(args) -> int:
             if key not in live_hashes:
                 warnings.append(f"dangling generated artifact: {child.relative_to(root).as_posix()}")
 
+    tesseract_path = shutil.which("tesseract") or ""
+    image_support = {
+        "metadata_indexing": True,
+        "ocr_active": bool(tesseract_path),
+        "tesseract_path": tesseract_path,
+        "indexed_image_documents": image_doc_count,
+    }
+
     report = {
         "root": str(root),
         "ok": not errors,
@@ -284,6 +298,7 @@ def cmd_doctor(args) -> int:
             "documents": manifest.get("documents"),
             "parse_errors": manifest.get("parse_errors"),
         },
+        "image_support": image_support,
     }
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -294,6 +309,11 @@ def cmd_doctor(args) -> int:
             print(f"WARN {warning}")
         for error in errors:
             print(f"ERR  {error}")
+        print("INFO image metadata indexing: active")
+        print(
+            "INFO image OCR (tesseract): "
+            + ("active" if image_support["ocr_active"] else "inactive")
+        )
     if errors:
         return 1
     if warnings:

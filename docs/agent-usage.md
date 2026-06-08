@@ -27,6 +27,11 @@ Documents/Downloads/Desktop/cloud roots that exist on the computer. Use
 `--foreground-prepare` to wait for it, `--prepare-root PATH` to add a root, or
 `--no-prepare` to skip post-install indexing.
 
+Image files contribute lightweight local metadata (format, dimensions, selected
+EXIF datetime when available). Text inside images/scanned PDFs is indexed only
+when `tesseract` is installed on the agent's PATH; check
+`jikji doctor ROOT --json` and inspect `image_support.ocr_active`.
+
 Agent flow:
 
 1. Start with the tool-first command. It auto-prepares an explicit root when

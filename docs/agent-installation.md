@@ -29,6 +29,21 @@ Optional developer validation:
 If you want `jikji` globally available, either add the checkout venv to your
 agent's PATH or install it into the Python environment that the agent uses.
 
+### Optional image OCR dependency
+
+Jikji indexes image files with lightweight local metadata (format, dimensions,
+and selected EXIF datetime when available) without extra tools. OCR text from
+images and scanned PDFs requires a local `tesseract` binary on the agent's PATH.
+Check the active state with:
+
+```bash
+jikji doctor /explicit/root --json
+```
+
+In the JSON report, `image_support.ocr_active` is `true` only when Tesseract is
+available. Without it, images are still searchable by filename/path/basic file
+metadata and the lightweight image metadata, but not by text inside the image.
+
 ## 2. Attach Jikji as an agent skill
 
 The reusable skill file lives here:
