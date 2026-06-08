@@ -858,15 +858,53 @@ def test_archive_member_names_are_cached_and_searchable(tmp_path, capsys):
 
 
 def test_optional_media_parsers_do_not_require_external_tools(tmp_path):
-    from jikji.parsers.media import parse_audio, parse_image
+    from jikji.parsers.media import parse_audio, parse_image, parse_video
 
     png = tmp_path / "empty.png"
     png.write_bytes(b"not a real png")
     wav = tmp_path / "empty.wav"
     wav.write_bytes(b"not a real wav")
+    mp4 = tmp_path / "empty.mp4"
+    mp4.write_bytes(b"not a real mp4")
 
     assert isinstance(parse_image(png, 1000), str)
     assert isinstance(parse_audio(wav, 1000), str)
+    assert isinstance(parse_video(mp4, 1000), str)
+
+
+def test_video_metadata_is_cached_and_searchable(tmp_path, monkeypatch, capsys):
+    from jikji.__main__ import main
+    from jikji.parsers import media
+
+    def fake_ffprobe_metadata(path):  # noqa: ARG001
+        return [
+            "Format: QuickTime / MOV",
+            "Duration seconds: 42.0",
+            "Title: Q1 launch demo",
+            "Comment: pricing-discussion-marker",
+            "Stream: video h264",
+            "Stream: audio aac",
+        ]
+
+    monkeypatch.setattr(media, "_ffprobe_metadata", fake_ffprobe_metadata)
+    video = tmp_path / "launch_demo.mp4"
+    video.write_bytes(b"fake video bytes; ffprobe is monkeypatched")
+
+    assert main(["prepare", str(tmp_path), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["docs_parsed"] == 1
+
+    rows = _jsonl(tmp_path / ".jikji" / "document_index.jsonl")
+    row = next(row for row in rows if row["path"] == "launch_demo.mp4")
+    assert row["parser_required"] is True
+    assert row["parse_status"] == "success"
+    cache = (tmp_path / row["text_cache_path"]).read_text(encoding="utf-8")
+    assert "# Video: launch_demo.mp4" in cache
+    assert "pricing-discussion-marker" in cache
+
+    assert main(["search", str(tmp_path), "pricing-discussion-marker", "--top-k", "1", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["candidates"][0]["path"] == "launch_demo.mp4"
 
 
 def test_structured_parser_recall_edge_cases(tmp_path):

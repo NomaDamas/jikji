@@ -121,6 +121,16 @@ SUPPORTED_EXTENSIONS: set[str] = {
     ".aac",
     ".opus",
     ".wma",
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".avi",
+    ".webm",
+    ".m4v",
+    ".wmv",
+    ".flv",
+    ".mpg",
+    ".mpeg",
     # Archives — listed for member-name extraction (no decompression).
     ".zip",
     ".jar",
@@ -219,6 +229,8 @@ def extract_excerpt(path: Path, max_chars: int = 1800, timeout: float = 5.0) -> 
         return _safe(media.parse_image, path, max_chars, timeout)
     if ext in {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus", ".wma"}:
         return _safe(media.parse_audio, path, max_chars, timeout)
+    if ext in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".mpg", ".mpeg"}:
+        return _safe(media.parse_video, path, max_chars, timeout)
     if ext == ".docx":
         return _safe(office.parse_docx, path, max_chars, timeout)
     if ext in {".pptx", ".ppsx"}:
