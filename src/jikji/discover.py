@@ -16,6 +16,7 @@ from .answer_pack import (
     handoff_policy_for,
     is_generated_artifact_path,
     next_read_for_candidate,
+    tool_call_policy_for,
 )
 from .eval import search
 
@@ -491,6 +492,12 @@ def discover(root: Path, query: str, *, top_k: int = 20, per_query_k: int | None
     allowed_llm_calls = int(budget["allowed_llm_calls"])
     if handoff_action == "direct_use" and answer_pack["requires_llm_rerank"]:
         allowed_llm_calls = max(allowed_llm_calls, int(answer_pack["allowed_llm_calls"]))
+    tool_call_policy = tool_call_policy_for(
+        handoff_action,
+        str(budget["answerability"]),
+        agent_should_not_rerank=bool(answer_pack["agent_should_not_rerank"]),
+        raw_fallback_allowed=bool(budget["raw_fallback_allowed"]),
+    )
     return {
         "mode": "discover",
         "answer_pack_version": 1,
@@ -511,6 +518,7 @@ def discover(root: Path, query: str, *, top_k: int = 20, per_query_k: int | None
         "requires_llm_rerank": answer_pack["requires_llm_rerank"],
         "agent_should_not_rerank": answer_pack["agent_should_not_rerank"],
         "answerability": budget["answerability"],
+        "tool_call_policy": tool_call_policy,
         "allowed_agent_tool_calls": budget["allowed_agent_tool_calls"],
         "allowed_llm_calls": allowed_llm_calls,
         "max_jikji_retries": budget["max_jikji_retries"],

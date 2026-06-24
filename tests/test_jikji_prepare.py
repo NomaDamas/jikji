@@ -223,6 +223,47 @@ def test_find_cli_classifies_and_returns_candidates(tmp_path, capsys):
     assert payload["agent_should_not_rerank"] is True
     assert payload["evidence_pack"]
 
+    policy = payload["tool_call_policy"]
+    assert policy["stop_after_find"] is True
+    assert policy["allowed_followups"] == ["verify_top_1_path", "return_answer_paths_to_user"]
+    for forbidden in ("read_file", "search", "grep", "find", "skills_list"):
+        assert forbidden in policy["forbidden_tools"]
+    assert policy["rerank_locked"] is True
+
+
+def test_tool_call_policy_blocks_followups_only_when_answerable():
+    from jikji.answer_pack import POST_FIND_FORBIDDEN_TOOLS, tool_call_policy_for
+
+    direct = tool_call_policy_for(
+        "direct_use",
+        "answerable_from_payload",
+        agent_should_not_rerank=True,
+        raw_fallback_allowed=False,
+    )
+    assert direct["stop_after_find"] is True
+    assert direct["forbidden_tools"] == list(POST_FIND_FORBIDDEN_TOOLS)
+    assert direct["escape_hatch"] == "none_unless_handoff_action_allows_jikji_retry_or_raw_fallback_after_retry"
+
+    retry = tool_call_policy_for(
+        "jikji_retry",
+        "needs_one_jikji_retry",
+        agent_should_not_rerank=False,
+        raw_fallback_allowed=False,
+    )
+    assert retry["stop_after_find"] is False
+    assert retry["forbidden_tools"] == []
+    assert retry["allowed_followups"] == ["run_one_sharper_jikji_find_retry"]
+
+    fallback = tool_call_policy_for(
+        "raw_fallback_after_retry",
+        "needs_raw_fallback_after_retry",
+        agent_should_not_rerank=False,
+        raw_fallback_allowed=True,
+    )
+    assert fallback["stop_after_find"] is False
+    assert fallback["forbidden_tools"] == []
+    assert "raw_fallback_after_retry" in fallback["allowed_followups"]
+
 
 def test_discover_promotes_explicit_path_anchor(tmp_path):
     from jikji.discover import discover

@@ -103,6 +103,64 @@ def handoff_budget_for(action: str) -> dict[str, Any]:
         "raw_fallback_allowed": False,
     }
 
+POST_FIND_FORBIDDEN_TOOLS = (
+    "read_file",
+    "search",
+    "grep",
+    "rg",
+    "find",
+    "fd",
+    "ls",
+    "cat",
+    "tree",
+    "glob",
+    "skills_list",
+)
+
+
+def tool_call_policy_for(
+    action: str,
+    answerability: str,
+    *,
+    agent_should_not_rerank: bool,
+    raw_fallback_allowed: bool,
+) -> dict[str, Any]:
+    """Enforce 'stop after a sufficient find' so agents do not keep calling tools.
+
+    When ``jikji find`` returns a payload that is answerable on its own the only
+    allowed follow-ups are minimal verification or returning the result. Any
+    further discovery tool is forbidden unless the handoff contract explicitly
+    permits ``jikji_retry`` or ``raw_fallback_after_retry``.
+    """
+    answerable = (
+        action == "direct_use"
+        or answerability == "answerable_from_payload"
+        or bool(agent_should_not_rerank)
+    )
+    if answerable and not raw_fallback_allowed:
+        return {
+            "stop_after_find": True,
+            "allowed_followups": ["verify_top_1_path", "return_answer_paths_to_user"],
+            "forbidden_tools": list(POST_FIND_FORBIDDEN_TOOLS),
+            "rerank_locked": bool(agent_should_not_rerank),
+            "reason": "jikji_find_result_is_answerable_from_payload",
+            "escape_hatch": "none_unless_handoff_action_allows_jikji_retry_or_raw_fallback_after_retry",
+        }
+    if action == "jikji_retry":
+        allowed_followups = ["run_one_sharper_jikji_find_retry"]
+    elif action == "raw_fallback_after_retry":
+        allowed_followups = ["verify_top_1_to_3_paths", "raw_fallback_after_retry"]
+    else:
+        allowed_followups = ["verify_top_1_to_3_paths"]
+    return {
+        "stop_after_find": False,
+        "allowed_followups": allowed_followups,
+        "forbidden_tools": [],
+        "rerank_locked": bool(agent_should_not_rerank),
+        "reason": f"jikji_find_result_requires_{action}",
+        "escape_hatch": action,
+    }
+
 
 def next_read_for_candidate(candidate: dict[str, Any]) -> dict[str, str]:
     cache = str(candidate.get("cache") or candidate.get("text_cache_path") or "")

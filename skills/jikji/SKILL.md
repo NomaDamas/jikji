@@ -64,6 +64,20 @@ Interpret the JSON contract:
   allowed only after that retry failed, stayed empty, or stayed clearly wrong.
 - If `agent_should_not_rerank` is true, preserve Jikji's order.
 
+## Stop Rule: Do Not Over-Call After a Sufficient Find
+
+`jikji find --json` returns a `tool_call_policy` object that you MUST obey:
+
+- When `tool_call_policy.stop_after_find` is true (i.e. `handoff_action=direct_use`,
+  `answerability=answerable_from_payload`, or `agent_should_not_rerank=true`), the
+  result is already sufficient. Do NOT call any tool in
+  `tool_call_policy.forbidden_tools` (`read_file`, `search`, `grep`, `rg`, `find`,
+  `fd`, `ls`, `cat`, `tree`, `glob`, `skills_list`, etc.).
+- The only allowed follow-ups are in `tool_call_policy.allowed_followups`: verify the
+  top 1 path, or return `answer_paths`/`paths` to the user as-is.
+- You may call another discovery tool only when `stop_after_find` is false and
+  `handoff_action` explicitly permits `jikji_retry` or `raw_fallback_after_retry`.
+
 For a single path-only answer you may add `--first`, but the default public
 protocol remains `jikji find ROOT "query" --json`.
 
