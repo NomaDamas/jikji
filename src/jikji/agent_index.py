@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -26,12 +27,13 @@ from .metadata import collect
 from .models import FileEntry
 from .parsers import extract_excerpt
 from .parsers.registry import SUPPORTED_EXTENSIONS
-from .scanner import ScanTooLargeError
 from .search_index import (
     INSTANT_SEARCH_INDEX,
     INSTANT_SEARCH_SCHEMA_VERSION,
     build_instant_search_index,
 )
+
+log = logging.getLogger(__name__)
 
 ProgressCB = Callable[[str, float], None]
 
@@ -437,11 +439,17 @@ def _scan_files_and_dirs(root: Path, config: Config) -> tuple[list[Path], list[P
     dirs: list[Path] = []
     files: list[Path] = []
     limit = int(getattr(config, "max_files", 5000) or 5000)
+    truncated = False
 
     def walk(cur: Path) -> None:
+        nonlocal truncated
+        if truncated:
+            return
         try:
             with os.scandir(cur) as it:
                 for entry in it:
+                    if truncated:
+                        return
                     name = entry.name
                     if _ignore_name(name, ignore):
                         continue
@@ -453,15 +461,25 @@ def _scan_files_and_dirs(root: Path, config: Config) -> tuple[list[Path], list[P
                             dirs.append(p)
                             walk(p)
                         elif entry.is_file(follow_symlinks=False):
+                            if len(files) >= limit:
+                                # Degrade gracefully to partial indexing instead
+                                # of failing the whole scan on oversized roots.
+                                truncated = True
+                                return
                             files.append(p)
-                            if len(files) > limit:
-                                raise ScanTooLargeError(len(files), limit)
                     except PermissionError:
                         continue
         except PermissionError:
             return
 
     walk(root)
+    if truncated:
+        log.warning(
+            "scan reached max_files limit (%d) under %s; indexing a partial set. "
+            "Raise --max-files to index more.",
+            limit,
+            root,
+        )
     return sorted(files, key=lambda p: str(p)), sorted(dirs, key=lambda p: str(p))
 
 
