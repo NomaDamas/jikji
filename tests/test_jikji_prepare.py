@@ -2095,3 +2095,65 @@ def test_hardbench_local_source_sampler_balances_extensions(tmp_path):
     assert len(docs) == 5
     assert {".pdf", ".hwp", ".xlsx"}.issubset(exts)
     assert all(doc["source_file"] for doc in docs)
+
+def test_prepare_writes_agent_routing_rules(tmp_path):
+    from jikji.agent_index import AGENT_RULES_BEGIN, AGENT_RULES_END
+
+    (tmp_path / "a.txt").write_text("hello world", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# My Project\n\nUser notes.\n", encoding="utf-8")
+
+    build_agent_index(tmp_path, Config())
+
+    agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents.startswith("# My Project")
+    assert "User notes." in agents
+    assert AGENT_RULES_BEGIN in agents
+    assert "jikji find" in agents
+    claude = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert claude.startswith(AGENT_RULES_BEGIN)
+    assert claude.rstrip().endswith(AGENT_RULES_END)
+    assert (tmp_path / ".cursorrules").exists()
+
+
+def test_prepare_agent_rules_block_is_idempotent(tmp_path):
+    from jikji.agent_index import AGENT_RULES_BEGIN
+
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    build_agent_index(tmp_path, Config())
+    first = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    build_agent_index(tmp_path, Config())
+    second = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert first == second
+    assert second.count(AGENT_RULES_BEGIN) == 1
+
+
+def test_prepare_no_agent_rules_opt_out(tmp_path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    cfg = Config()
+    cfg.write_agent_rules = False
+    build_agent_index(tmp_path, cfg)
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / ".cursorrules").exists()
+
+
+def test_clean_strips_agent_rules_block_and_preserves_user_content(tmp_path, capsys):
+    from jikji.__main__ import main
+
+    (tmp_path / "a.txt").write_text("keep me", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# My Project\n\nUser notes.\n", encoding="utf-8")
+    assert main(["prepare", str(tmp_path), "--json"]) == 0
+    capsys.readouterr()
+
+    assert main(["clean", str(tmp_path), "--json"]) == 0
+    cleaned = json.loads(capsys.readouterr().out)
+    assert cleaned["ok"] is True
+    assert str(tmp_path / "CLAUDE.md") in cleaned["removed"]
+    assert str(tmp_path / "AGENTS.md") in cleaned["agent_rules_edited"]
+
+    agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "User notes." in agents
+    assert "JIKJI ROUTING" not in agents
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / ".cursorrules").exists()
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "keep me"

@@ -44,3 +44,7 @@ class Config:
     agent_doc_text_chunk_chars: int = 1_000_000
     enable_media_index: bool = False
     media_index_max_mb: float = 25.0
+    # When true, `jikji prepare` writes/refreshes a routing block in project-local
+    # agent rule files (AGENTS.md, CLAUDE.md, .cursorrules) pointing agents at
+    # `jikji find` before native crawlers. Removed again by `jikji clean`.
+    write_agent_rules: bool = True

@@ -24,6 +24,7 @@ from .agent_index import (
     VISIBLE_MAP_NAME,
     VISIBLE_MAP_NAMES,
     build_agent_index,
+    strip_agent_rules_files,
     tree_signature,
 )
 from .agent_skill_install import (
@@ -134,6 +135,7 @@ def _config_from_args(args) -> Config:
     cfg.media_index_max_mb = float(getattr(args, "media_index_max_mb", 25.0) or 25.0)
     if args.exclude:
         cfg.ignore_patterns.extend(args.exclude)
+    cfg.write_agent_rules = not getattr(args, "no_agent_rules", False)
     return cfg
 
 
@@ -410,16 +412,19 @@ def cmd_clean(args) -> int:
     targets = _clean_targets(root)
     existing = [p for p in targets if p.exists()]
     has_agent_dir = (root / AGENT_DIR_NAME).exists()
+    rules_preview = strip_agent_rules_files(root, dry_run=True)
+    rules_block_paths = rules_preview["edited"] + rules_preview["removed"]
     payload = {
         "root": str(root),
-        "ok": allowed or (not existing and not has_agent_dir),
+        "ok": allowed or (not existing and not has_agent_dir and not rules_block_paths),
         "reason": reason,
         "dry_run": args.dry_run,
         "removed": [],
-        "would_remove": [str(p) for p in existing],
+        "would_remove": [str(p) for p in existing] + rules_preview["removed"],
+        "agent_rules_edited": rules_preview["edited"],
         "preserved_original_files": True,
     }
-    if (existing or has_agent_dir) and not allowed:
+    if (existing or has_agent_dir or rules_block_paths) and not allowed:
         payload["error"] = (
             f"Refusing to remove {root / AGENT_DIR_NAME} without a verified Jikji manifest. "
             "Use --force only if this directory is known to be Jikji-generated."
@@ -446,6 +451,9 @@ def cmd_clean(args) -> int:
                 removed.append(str(p))
             except OSError as exc:
                 payload.setdefault("errors", []).append({"path": str(p), "error": str(exc)})
+        rules_applied = strip_agent_rules_files(root, dry_run=False)
+        removed.extend(rules_applied["removed"])
+        payload["agent_rules_edited"] = rules_applied["edited"]
         payload["removed"] = removed
         payload["ok"] = not payload.get("errors")
     if args.json:
@@ -2135,6 +2143,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--doc-text-chunk-chars", type=int, default=1_000_000)
         p.add_argument("--enable-media-index", action="store_true", help="opt in to bounded local OCR/ASR for image/audio/video; may use CPU/RAM")
         p.add_argument("--media-index-max-mb", type=float, default=25.0, help="skip media OCR/ASR for files larger than this size")
+        p.add_argument("--no-agent-rules", action="store_true", help="do not write the Jikji routing block into project-local AGENTS.md/CLAUDE.md/.cursorrules")
         p.add_argument("--json", action="store_true")
 
     p_prepare = sub.add_parser("prepare", help="create/update .jikji without moving files")

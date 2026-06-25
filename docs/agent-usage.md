@@ -44,6 +44,22 @@ Do not start file discovery with `ls`, `find`, `rg`, `grep`, `tree`, or broad
 manual opening. Those are fallback actions only after the Jikji handoff contract
 allows them.
 
+## Project-Local Routing Rules
+
+`jikji prepare` writes a clearly-delimited routing block into the project-local
+agent rule files at the prepared root so coding agents discover Jikji without any
+extra configuration:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.cursorrules`
+
+The block is delimited by `<!-- BEGIN JIKJI ROUTING -->` / `<!-- END JIKJI
+ROUTING -->`, is refreshed in place on every prepare (idempotent), and preserves
+any surrounding user-authored content. `jikji clean` removes just the block again
+(deleting the file only when Jikji created it). Skip this with
+`jikji prepare ROOT --no-agent-rules`.
+
 ## Admin Commands
 
 ```bash

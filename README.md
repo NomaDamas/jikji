@@ -197,6 +197,7 @@ jikji skill-export --dest /path/to/that-agent/skills/jikji/SKILL.md --json
 
 ```text
 .jikji_agent_map.md         root guide for humans and agents
+AGENTS.md / CLAUDE.md / .cursorrules  routing block pointing agents to `jikji find`
 .jikji/search_index.sqlite  instant lexical/content/metadata search index
 .jikji/doc_text/            parsed PDF/HWP/HWPX/Office/etc. text cache
 .jikji/file_cards.jsonl     per-file cards, tags, parse status, evidence
@@ -208,7 +209,10 @@ jikji skill-export --dest /path/to/that-agent/skills/jikji/SKILL.md --json
 .jikji/graph_routes.jsonl   low-token route rows
 ```
 
-Generated artifacts can be regenerated or removed with `jikji clean`.
+Generated artifacts can be regenerated or removed with `jikji clean`. The routing
+block in `AGENTS.md` / `CLAUDE.md` / `.cursorrules` is updated in place on each
+prepare and can be skipped with `jikji prepare ROOT --no-agent-rules`; `jikji
+clean` removes the block while preserving any user-authored content.
 
 ## Media Text
 
