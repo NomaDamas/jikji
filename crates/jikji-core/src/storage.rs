@@ -6,11 +6,30 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::{JIKJI_DIR, Result, io_error, json_error};
 
 const DATABASE_SCHEMA_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RootStatistics {
+    pub files: usize,
+    pub folders: usize,
+    pub documents: usize,
+    pub chunks: usize,
+    pub parse_errors: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct IndexedRoot {
+    pub root: PathBuf,
+    pub updated_at: i64,
+    pub artifact_count: usize,
+    pub statistics: RootStatistics,
+    pub deep_index: Option<Value>,
+}
 
 static INITIALIZED_DATABASES: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -94,6 +113,11 @@ pub fn ensure_root(connection: &Connection, root: &Path) -> Result<i64> {
         .map_err(sqlite_error_path)
 }
 
+pub fn register_root(root: &Path) -> Result<i64> {
+    let connection = open_database()?;
+    ensure_root(&connection, root)
+}
+
 pub fn root_id(connection: &Connection, root: &Path) -> Result<Option<i64>> {
     let canonical = root_key(root)?;
     connection
@@ -104,6 +128,41 @@ pub fn root_id(connection: &Connection, root: &Path) -> Result<Option<i64>> {
         )
         .optional()
         .map_err(sqlite_error_path)
+}
+
+pub fn indexed_roots() -> Result<Vec<IndexedRoot>> {
+    let connection = open_database()?;
+    let mut statement = connection
+        .prepare("SELECT id, canonical_root, updated_at FROM roots ORDER BY updated_at DESC, canonical_root")
+        .map_err(sqlite_error_path)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(sqlite_error_path)?;
+    let mut roots = Vec::new();
+    for row in rows {
+        let (root_id, canonical_root, updated_at) = row.map_err(sqlite_error_path)?;
+        roots.push(indexed_root(
+            &connection,
+            root_id,
+            canonical_root,
+            updated_at,
+        )?);
+    }
+    Ok(roots)
+}
+
+pub fn root_statistics(root: &Path) -> Result<RootStatistics> {
+    let connection = open_database()?;
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(empty_statistics());
+    };
+    statistics_for_id(&connection, root_id)
 }
 
 pub fn root_storage_dir(root: &Path) -> Result<PathBuf> {
@@ -162,13 +221,47 @@ pub fn load_artifact(root: &Path, kind: &str) -> Result<Option<Value>> {
     Ok(load_artifacts(root, kind)?.into_iter().next())
 }
 
-pub fn delete_root(root: &Path) -> Result<bool> {
+pub fn store_artifact(root: &Path, kind: &str, value: Value) -> Result<()> {
+    replace_artifacts(root, &[(kind, value)])
+}
+
+pub fn clear_artifact(root: &Path, kind: &str) -> Result<()> {
     let connection = open_database()?;
-    let canonical = root_key(root)?;
-    let changed = connection
-        .execute("DELETE FROM roots WHERE canonical_root=?1", [&canonical])
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(());
+    };
+    connection
+        .execute(
+            "DELETE FROM artifacts WHERE root_id=?1 AND kind=?2",
+            params![root_id, kind],
+        )
         .map_err(sqlite_error_path)?;
-    Ok(changed > 0)
+    Ok(())
+}
+
+pub fn delete_root(root: &Path) -> Result<bool> {
+    let canonical = root_key(root)?;
+    delete_root_by_key(&canonical)
+}
+
+pub fn delete_root_by_key(canonical: &str) -> Result<bool> {
+    let connection = open_database()?;
+    let root_id = connection
+        .query_row(
+            "SELECT id FROM roots WHERE canonical_root=?1",
+            [canonical],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(sqlite_error_path)?;
+    let Some(root_id) = root_id else {
+        return Ok(false);
+    };
+    remove_root_cache(root_id)?;
+    connection
+        .execute("DELETE FROM roots WHERE id=?1", [root_id])
+        .map_err(sqlite_error_path)?;
+    Ok(true)
 }
 
 pub fn migrate_legacy(root: &Path) -> Result<bool> {
@@ -229,6 +322,100 @@ pub fn migrate_legacy(root: &Path) -> Result<bool> {
         .collect::<Vec<_>>();
     replace_artifacts(root, &refs)?;
     Ok(true)
+}
+
+fn indexed_root(
+    connection: &Connection,
+    root_id: i64,
+    canonical_root: String,
+    updated_at: i64,
+) -> Result<IndexedRoot> {
+    let artifact_count = connection
+        .query_row(
+            "SELECT COUNT(*) FROM artifacts WHERE root_id=?1",
+            [root_id],
+            |row| row.get::<_, usize>(0),
+        )
+        .map_err(sqlite_error_path)?;
+    let deep_index = connection
+        .query_row(
+            "SELECT row_json FROM artifacts WHERE root_id=?1 AND kind='deep_index_status' ORDER BY ordinal DESC LIMIT 1",
+            [root_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_error_path)?
+        .map(|raw| {
+            serde_json::from_str(&raw)
+                .map_err(|source| json_error(database_path().unwrap_or_default(), source))
+        })
+        .transpose()?;
+    Ok(IndexedRoot {
+        root: PathBuf::from(canonical_root),
+        updated_at,
+        artifact_count,
+        statistics: statistics_for_id(connection, root_id)?,
+        deep_index,
+    })
+}
+
+fn statistics_for_id(connection: &Connection, root_id: i64) -> Result<RootStatistics> {
+    let mut statistics = empty_statistics();
+    for kind in ["files", "folders", "documents", "chunks", "parse_errors"] {
+        let values = load_artifacts_by_id(connection, root_id, kind)?;
+        let count = values
+            .iter()
+            .filter(|value| value.get("status").and_then(Value::as_str) != Some("deleted"))
+            .count();
+        match kind {
+            "files" => statistics.files = count,
+            "folders" => statistics.folders = count,
+            "documents" => statistics.documents = count,
+            "chunks" => statistics.chunks = count,
+            "parse_errors" => statistics.parse_errors = count,
+            _ => unreachable!(),
+        }
+    }
+    Ok(statistics)
+}
+
+fn load_artifacts_by_id(connection: &Connection, root_id: i64, kind: &str) -> Result<Vec<Value>> {
+    let mut statement = connection
+        .prepare("SELECT row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal")
+        .map_err(sqlite_error_path)?;
+    let rows = statement
+        .query_map(params![root_id, kind], |row| row.get::<_, String>(0))
+        .map_err(sqlite_error_path)?;
+    rows.map(|row| {
+        let raw = row.map_err(sqlite_error_path)?;
+        serde_json::from_str(&raw)
+            .map_err(|source| json_error(database_path().unwrap_or_default(), source))
+    })
+    .collect()
+}
+
+fn empty_statistics() -> RootStatistics {
+    RootStatistics {
+        files: 0,
+        folders: 0,
+        documents: 0,
+        chunks: 0,
+        parse_errors: 0,
+    }
+}
+
+fn remove_root_cache(root_id: i64) -> Result<()> {
+    let cache = data_dir()?.join("jikji/roots").join(root_id.to_string());
+    let metadata = match fs::symlink_metadata(&cache) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(io_error(&cache, source)),
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(&cache).map_err(|source| io_error(&cache, source))
+    } else {
+        fs::remove_dir_all(&cache).map_err(|source| io_error(&cache, source))
+    }
 }
 
 fn initialize(connection: &Connection, path: &Path) -> Result<()> {

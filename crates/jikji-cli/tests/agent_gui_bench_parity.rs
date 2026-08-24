@@ -280,3 +280,111 @@ fn workspacebench_suite_uses_downloaded_endpoint_data() {
         "downloaded"
     );
 }
+
+#[test]
+fn gui_explorer_lists_current_root_entries_with_metadata() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("root");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("source");
+    fs::write(root.join("README.txt"), "project overview\n").expect("readme");
+    json_cmd(["prepare", path_str(&root).as_str(), "--json"]);
+
+    let gui = GuiChild::start(&root);
+    let root_listing = response_json(&gui.get("/api/files"));
+    assert_eq!(root_listing["path"], ".");
+    let entries = root_listing["entries"].as_array().expect("entries");
+    assert_eq!(entries[0]["name"], "src");
+    let readme = entries
+        .iter()
+        .find(|entry| entry["name"] == "README.txt")
+        .expect("README entry");
+    assert_eq!(readme["type"], "file");
+    assert_eq!(readme["status"], "current");
+    assert!(readme["size"].as_u64().expect("size") > 0);
+    assert!(readme["mtime"].as_u64().is_some());
+
+    let nested = response_json(&gui.get("/api/files?path=src"));
+    assert_eq!(nested["path"], "src");
+    assert_eq!(nested["entries"][0]["path"], "src/main.rs");
+}
+
+#[test]
+fn gui_find_candidates_include_preview_snippets() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("root");
+    fs::create_dir(&root).expect("root");
+    fs::write(
+        root.join("ACME_contract.txt"),
+        "ACME payment terms are net thirty days and renewable annually.",
+    )
+    .expect("fixture");
+    json_cmd(["prepare", path_str(&root).as_str(), "--json"]);
+
+    let gui = GuiChild::start(&root);
+    let found = response_json(&gui.get("/api/find?q=payment"));
+    assert_eq!(found["mode"], "find");
+    assert_eq!(found["answer_pack_version"], 1);
+    assert_eq!(found["candidates"][0]["p"], "ACME_contract.txt");
+    assert_eq!(found["candidates"][0]["path"], "ACME_contract.txt");
+    assert!(found["candidates"][0]["score"].as_f64().is_some());
+    assert!(
+        found["candidates"][0]["preview_snippet"]
+            .as_str()
+            .expect("snippet")
+            .contains("payment terms")
+    );
+}
+
+#[test]
+fn gui_text_and_code_preview_return_unicode_highlight_ranges() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("root");
+    fs::create_dir(&root).expect("root");
+    fs::write(root.join("notes.txt"), "😀가 needle and needle").expect("text");
+    fs::write(root.join("main.rs"), "fn needle() {}\n").expect("code");
+    let gui = GuiChild::start(&root);
+
+    let text = response_json(&gui.get("/api/preview?path=notes.txt&q=needle"));
+    assert_eq!(text["supported"], true);
+    assert_eq!(text["encoding"], "utf-8");
+    assert_eq!(text["match_unit"], "utf16_code_unit");
+    assert_eq!(text["matches"][0]["start"], 4);
+    assert_eq!(text["matches"][0]["end"], 10);
+    assert_eq!(text["matches"][1]["start"], 15);
+    assert_eq!(text["matches"][1]["end"], 21);
+
+    let code = response_json(&gui.get("/api/preview?path=main.rs&q=needle"));
+    assert_eq!(code["supported"], true);
+    assert!(
+        code["content"]
+            .as_str()
+            .expect("code")
+            .contains("fn needle")
+    );
+    assert_eq!(code["matches"][0]["start"], 3);
+}
+
+#[test]
+fn gui_preview_binary_fallback_and_traversal_are_controlled() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("root");
+    fs::create_dir(&root).expect("root");
+    fs::write(root.join("image.bin"), [0, 159, 146, 150]).expect("binary");
+    let gui = GuiChild::start(&root);
+
+    let binary = response_json(&gui.get("/api/preview?path=image.bin"));
+    assert_eq!(binary["supported"], false);
+    assert_eq!(binary["reason"], "binary");
+    assert_eq!(binary["size"], 4);
+    assert!(binary.get("content").is_none());
+
+    assert_rejected(&gui.get("/api/preview?path=../outside.txt"));
+    assert_rejected(&gui.get("/api/files?path=.."));
+    assert_rejected(&gui.get("/api/preview?path=%2e%2e%2foutside.txt"));
+}
+
+fn response_json(response: &str) -> serde_json::Value {
+    let (_, body) = response.split_once("\r\n\r\n").expect("HTTP body");
+    serde_json::from_str(body).expect("JSON response")
+}

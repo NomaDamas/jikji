@@ -143,20 +143,37 @@ fn percent_decode(value: &str) -> String {
     let mut idx = 0;
     while idx < bytes.len() {
         match bytes[idx] {
-            b'+' => out.push(b' '),
-            b'%' if idx + 2 < bytes.len() => {
-                if let Ok(hex) = u8::from_str_radix(&value[idx + 1..idx + 3], 16) {
-                    out.push(hex);
-                    idx += 3;
-                    continue;
-                }
-                out.push(bytes[idx]);
+            b'+' => {
+                out.push(b' ');
+                idx += 1;
             }
-            byte => out.push(byte),
+            b'%' if idx + 2 < bytes.len() => {
+                if let (Some(high), Some(low)) =
+                    (hex_value(bytes[idx + 1]), hex_value(bytes[idx + 2]))
+                {
+                    out.push((high << 4) | low);
+                    idx += 3;
+                } else {
+                    out.push(bytes[idx]);
+                    idx += 1;
+                }
+            }
+            byte => {
+                out.push(byte);
+                idx += 1;
+            }
         }
-        idx += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub(crate) fn malformed_request() -> HttpResponse {
