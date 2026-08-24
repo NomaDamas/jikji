@@ -37,7 +37,7 @@ fn central_db_default_policy_deep_index_refresh_and_agent_fallback_work_end_to_e
         ],
         &[],
     );
-    assert_eq!(prepared["files"], 6);
+    assert_eq!(prepared["files"], 5);
     assert!(fixture.database().is_file());
     assert!(!fixture.root.join(".jikji").exists());
 
@@ -172,6 +172,37 @@ fn central_db_default_policy_deep_index_refresh_and_agent_fallback_work_end_to_e
 }
 
 #[test]
+fn coding_file_bodies_are_indexed_by_default() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.root.join("main.rs"),
+        "fn code_body_qz991unique() -> &'static str { \"indexed\" }",
+    )
+    .unwrap();
+    fixture.json(
+        [
+            "prepare",
+            fixture.root_str().as_str(),
+            "--no-agent-rules",
+            "--json",
+        ],
+        &[],
+    );
+    let found = fixture.json(
+        [
+            "find",
+            fixture.root_str().as_str(),
+            "code_body_qz991unique",
+            "--no-background-refresh",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(found["paths"][0], "main.rs");
+    assert!(candidate_evidence(&found).contains("code_body_qz991unique"));
+}
+
+#[test]
 fn empty_results_reindex_once_and_retry_same_query() {
     for command in ["search", "brief", "find", "discover"] {
         let fixture = Fixture::new();
@@ -269,7 +300,7 @@ impl Fixture {
         self.data.join("jikji/index.sqlite")
     }
     fn write_engine(&self) -> PathBuf {
-        let path = self.root.join("media-engine.sh");
+        let path = self._temp.path().join("media-engine.sh");
         fs::write(&path, "#!/bin/sh\ncase \"$JIKJI_MEDIA_ENGINE_KIND\" in\n image) echo configured-image-body-token-881;;\n audio) echo configured-audio-body-token-882;;\n video) echo configured-video-body-token-883;;\nesac\n").unwrap();
         let mut permissions = fs::metadata(&path).unwrap().permissions();
         permissions.set_mode(0o755);
