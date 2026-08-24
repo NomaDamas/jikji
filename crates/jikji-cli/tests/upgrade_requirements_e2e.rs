@@ -171,6 +171,60 @@ fn central_db_default_policy_deep_index_refresh_and_agent_fallback_work_end_to_e
     assert!(markdown.contains("deep-index"));
 }
 
+#[test]
+fn empty_results_reindex_once_and_retry_same_query() {
+    for command in ["search", "brief", "find", "discover"] {
+        let fixture = Fixture::new();
+        fs::write(fixture.root.join("old.txt"), "old-token").unwrap();
+        fixture.json(
+            [
+                "prepare",
+                fixture.root_str().as_str(),
+                "--no-agent-rules",
+                "--json",
+            ],
+            &[],
+        );
+        fs::write(fixture.root.join("new.txt"), "qznew997unique").unwrap();
+        let payload = fixture.json(
+            [
+                command,
+                fixture.root_str().as_str(),
+                "qznew997unique",
+                "--json",
+                "--no-background-refresh",
+            ],
+            &[],
+        );
+        assert_eq!(
+            payload["empty_result_reindexed"], true,
+            "command={command} payload={payload}"
+        );
+        let paths = payload.get("paths").or_else(|| payload.get("answer_paths"));
+        if let Some(paths) = paths.and_then(Value::as_array) {
+            assert!(
+                paths.iter().any(|path| path == "new.txt"),
+                "command={command} payload={payload}"
+            );
+        } else {
+            assert!(
+                payload["candidates"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|candidate| {
+                        candidate
+                            .get("path")
+                            .or_else(|| candidate.get("p"))
+                            .and_then(Value::as_str)
+                            == Some("new.txt")
+                    }),
+                "command={command} payload={payload}"
+            );
+        }
+    }
+}
+
 fn candidate_evidence(value: &Value) -> String {
     value["candidates"]
         .as_array()

@@ -135,7 +135,7 @@ fn assert_stale_previous_index_contract(root: &std::path::Path, root_arg: &str) 
         "-1",
         "--json",
     ]);
-    assert_eq!(stale["index_status"], "changed_using_previous_index");
-    assert_eq!(stale["foreground_prepared"], false);
-    assert!(!stale["candidates"].to_string().contains("new-file.txt"));
+    assert_eq!(stale["index_status"], "ready");
+    assert_eq!(stale["foreground_prepared"], true);
+    assert_eq!(stale["empty_result_reindexed"], true);
 }

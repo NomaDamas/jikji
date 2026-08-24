@@ -29,7 +29,16 @@ pub(crate) fn run_search(args: SearchArgs) -> jikji_core::Result<ExitCode> {
         print_missing_index(&args.root);
         return Ok(ExitCode::from(1));
     }
-    let candidates = search(&args.root, &args.query, SearchOptions { top_k: args.top_k })?;
+    let mut candidates = search(&args.root, &args.query, SearchOptions { top_k: args.top_k })?;
+    let empty_result_reindexed = if candidates.is_empty() && !prepared.foreground_prepared {
+        prepare(&args.root, &prepare_options)?;
+        candidates = search(&args.root, &args.query, SearchOptions { top_k: args.top_k })?;
+        prepared.status = IndexStatus::Ready;
+        prepared.foreground_prepared = true;
+        true
+    } else {
+        false
+    };
     start_deferred_background_refresh(&mut prepared, &args.root, &prepare_options);
     let payload = serde_json::json!({
         "root": args.root.display().to_string(),
@@ -38,6 +47,7 @@ pub(crate) fn run_search(args: SearchArgs) -> jikji_core::Result<ExitCode> {
         "index_status": prepared.status.as_str(),
         "foreground_prepared": prepared.foreground_prepared,
         "background_refresh_started": prepared.background_refresh_started,
+        "empty_result_reindexed": empty_result_reindexed,
         "candidates": candidates,
     });
     if args.json {
@@ -62,7 +72,16 @@ pub(crate) fn run_brief(args: BriefArgs) -> jikji_core::Result<ExitCode> {
         print_missing_index(&args.root);
         return Ok(ExitCode::from(1));
     }
-    let candidates = search(&args.root, &args.query, SearchOptions { top_k: args.top_k })?;
+    let mut candidates = search(&args.root, &args.query, SearchOptions { top_k: args.top_k })?;
+    let empty_result_reindexed = if candidates.is_empty() && !prepared.foreground_prepared {
+        prepare(&args.root, &prepare_options)?;
+        candidates = search(&args.root, &args.query, SearchOptions { top_k: args.top_k })?;
+        prepared.status = IndexStatus::Ready;
+        prepared.foreground_prepared = true;
+        true
+    } else {
+        false
+    };
     start_deferred_background_refresh(&mut prepared, &args.root, &prepare_options);
     let options = BriefOptions {
         top_k: args.top_k,
@@ -86,6 +105,8 @@ pub(crate) fn run_brief(args: BriefArgs) -> jikji_core::Result<ExitCode> {
             &candidates,
         )
     };
+    let mut payload = payload;
+    payload["empty_result_reindexed"] = serde_json::json!(empty_result_reindexed);
     if args.json && args.compact {
         print_json_compact(&payload)?;
     } else if args.json {
@@ -113,12 +134,22 @@ pub(crate) fn run_find(args: FindArgs) -> jikji_core::Result<ExitCode> {
         Ok(payload) => payload,
         Err(error) => return emit_find_recovery(&args, "failure", Some(error.to_string())),
     };
+    let empty_result_reindexed = if payload_paths_empty(&payload) && !prepared.foreground_prepared {
+        prepare(&args.root, &prepare_options)?;
+        payload = discover_payload(&args)?;
+        prepared.status = IndexStatus::Ready;
+        prepared.foreground_prepared = true;
+        true
+    } else {
+        false
+    };
     start_deferred_background_refresh(&mut prepared, &args.root, &prepare_options);
     payload["mode"] = serde_json::json!("find");
     payload["command"] = serde_json::json!("jikji find");
     payload["index_status"] = serde_json::json!(prepared.status.as_str());
     payload["foreground_prepared"] = serde_json::json!(prepared.foreground_prepared);
     payload["background_refresh_started"] = serde_json::json!(prepared.background_refresh_started);
+    payload["empty_result_reindexed"] = serde_json::json!(empty_result_reindexed);
     if args.first {
         for key in ["answer_paths", "paths", "candidates", "evidence_pack"] {
             truncate_array_field(&mut payload, key, 1);
@@ -151,16 +182,33 @@ pub(crate) fn run_discover(args: FindArgs) -> jikji_core::Result<ExitCode> {
         Ok(payload) => payload,
         Err(error) => return emit_find_recovery(&args, "failure", Some(error.to_string())),
     };
+    let empty_result_reindexed = if payload_paths_empty(&payload) && !prepared.foreground_prepared {
+        prepare(&args.root, &prepare_options)?;
+        payload = discover_payload(&args)?;
+        prepared.status = IndexStatus::Ready;
+        prepared.foreground_prepared = true;
+        true
+    } else {
+        false
+    };
     start_deferred_background_refresh(&mut prepared, &args.root, &prepare_options);
     payload["index_status"] = serde_json::json!(prepared.status.as_str());
     payload["foreground_prepared"] = serde_json::json!(prepared.foreground_prepared);
     payload["background_refresh_started"] = serde_json::json!(prepared.background_refresh_started);
+    payload["empty_result_reindexed"] = serde_json::json!(empty_result_reindexed);
     if args.json {
         print_json_compact(&payload)?;
     } else {
         println!("{}", payload);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn payload_paths_empty(payload: &serde_json::Value) -> bool {
+    payload
+        .get("paths")
+        .and_then(serde_json::Value::as_array)
+        .is_none_or(Vec::is_empty)
 }
 
 fn discover_payload(args: &FindArgs) -> jikji_core::Result<serde_json::Value> {
