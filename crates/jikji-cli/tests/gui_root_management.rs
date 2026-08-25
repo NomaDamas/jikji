@@ -74,6 +74,41 @@ fn gui_root_management_is_token_protected_isolated_and_complete() {
     assert_eq!(refreshed["statistics"]["files"], 2);
     let reindexed = response_json(&gui.post(&format!("/api/reindex?token={}", gui.token)), 200);
     assert_eq!(reindexed["statistics"]["files"], 2);
+    fs::create_dir_all(root2.join("nested")).expect("nested");
+    fs::write(root2.join("nested").join("keep.txt"), "nested marker").expect("nested file");
+    let folder_reindexed = response_json(
+        &gui.post(&format!(
+            "/api/reindex-folder?path=nested&token={}",
+            gui.token
+        )),
+        200,
+    );
+    assert_eq!(folder_reindexed["path"], "nested");
+    assert_eq!(folder_reindexed["state"], "completed");
+    let deep_target = response_json(
+        &gui.post(&format!(
+            "/api/deep-index-target?path=nested&enabled=true&token={}",
+            gui.token
+        )),
+        200,
+    );
+    assert_eq!(deep_target["enabled"], true);
+    let removed_folder = response_json(
+        &gui.post(&format!(
+            "/api/remove-folder?path=nested&token={}",
+            gui.token
+        )),
+        200,
+    );
+    assert_eq!(removed_folder["source_preserved"], true);
+    assert!(root2.join("nested").join("keep.txt").is_file());
+    assert_status(
+        &gui.post(&format!(
+            "/api/remove-folder?path=../root1&token={}",
+            gui.token
+        )),
+        403,
+    );
 
     let deep = response_json(
         &gui.post(&format!("/api/deep-index?token={}", gui.token)),

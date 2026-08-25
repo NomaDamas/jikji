@@ -133,7 +133,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
     <nav class="pane explorer-pane" aria-labelledby="explorer-title">
       <div class="pane-head"><h2 id="explorer-title">Library</h2><span class="spacer"></span><button class="compact" id="refresh" type="button">Refresh</button></div>
       <label class="sr-only" for="root-select">Indexed root</label><select class="root-select" id="root-select"><option>Loading roots…</option></select>
-      <div class="tree-path" id="tree-path">/</div>
+      <div class="tree-path" id="tree-path">/</div><div class="eyebrow" id="folder-context" aria-live="polite">Current folder: /</div>
       <ul class="list" id="file-list" aria-live="polite"><li class="state"><strong>Loading library</strong>Reading indexed files…</li></ul>
     </nav>
     <section class="pane" aria-labelledby="results-title">
@@ -148,7 +148,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
   </main>
   <footer class="pane-head" aria-label="Index management">
     <span class="eyebrow">Folder controls</span><span class="spacer"></span>
-    <button id="reindex" type="button">Reindex</button><button id="deep-index" type="button">Deep index</button><button class="danger" id="remove-root" type="button">Remove root</button>
+    <button id="reindex" type="button">Reindex root</button><button id="reindex-folder" type="button">Reindex folder</button><button id="deep-index" type="button">Deep index root</button><button id="deep-target-enable" type="button">Deep index folder</button><button id="deep-target-disable" type="button">Stop deep folder</button><button id="remove-folder" class="danger" type="button">Remove folder</button><button class="danger" id="remove-root" type="button">Remove root</button>
   </footer>
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-copy">
@@ -159,7 +159,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
   (() => {
     "use strict";
     const $ = (id) => document.getElementById(id);
-    const state = { root: "", folder: "", selected: "", query: "", roots: [], confirmAction: null };
+    const state = { root: "", folder: "", selected: "", query: "", roots: [], confirmAction: null, request: {} };
     const number = new Intl.NumberFormat();
     const setText = (id, value) => { $(id).textContent = value == null || value === "" ? "—" : String(value); };
     const bytes = (value) => { const n = Number(value); if (!Number.isFinite(n)) return "—"; const u = ["B","KB","MB","GB","TB"]; let i=0,x=n; while(x>=1024&&i<u.length-1){x/=1024;i++;} return `${x>=10||i===0?x.toFixed(0):x.toFixed(1)} ${u[i]}`; };
@@ -170,12 +170,16 @@ const INDEX_HTML: &str = r##"<!doctype html>
     function toast(message) { const el=$("toast"); el.textContent=message; el.hidden=false; clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.hidden=true,3200); }
     function params(values) { const out=new URLSearchParams(); Object.entries(values).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=="")out.set(k,String(v));}); return out; }
     async function api(path, values={}, options={}) {
-      const url = `${path}?${params(values)}`;
-      const response = await fetch(url, { method: options.method || "GET", headers: { "Accept": "application/json" }, cache: "no-store" });
-      const contentType = response.headers.get("content-type") || "";
-      const payload = contentType.includes("json") ? await response.json() : await response.text();
-      if (!response.ok) throw new Error(payload && payload.error ? payload.error : `Request failed (${response.status})`);
-      return payload;
+      const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),15000);
+      try {
+        const url = `${path}?${params(values)}`;
+        const response = await fetch(url, { method: options.method || "GET", headers: { "Accept": "application/json" }, cache: "no-store", signal: controller.signal });
+        const contentType = response.headers.get("content-type") || "";
+        const payload = contentType.includes("json") ? await response.json() : await response.text();
+        if (!response.ok) throw new Error(payload && payload.error ? payload.error : `Request failed (${response.status})`);
+        return payload;
+      } catch(error) { if (error?.name === "AbortError") throw new Error("Request timed out. Retry the action."); throw error; }
+      finally { clearTimeout(timeout); }
     }
     function token() { const value=$("manage-token").value.trim(); if (!value) { $("manage-token").focus(); throw new Error("Enter the management token printed when Jikji GUI started."); } return value; }
     function listState(target, title, copy) { target.replaceChildren(); const li=document.createElement("li"); li.className="state"; const strong=document.createElement("strong"); strong.textContent=title; li.append(strong,document.createTextNode(copy)); target.append(li); }
@@ -193,14 +197,14 @@ const INDEX_HTML: &str = r##"<!doctype html>
       if (!state.roots.length) { const option=document.createElement("option"); option.textContent="No indexed roots"; select.append(option); select.disabled=true; return; }
       select.disabled=false; state.roots.forEach(item=>{const option=document.createElement("option"); option.value=item.root; option.textContent=item.root; option.selected=item.root===state.root; select.append(option);});
     }
-    async function loadStatus() { const data=await api("/api/status"); state.root=data.root || state.root; updateStats(data); }
+    async function loadStatus() { try { const data=await api("/api/status"); state.root=data.root || state.root; updateStats(data); } catch(error) { setText("health","Error"); showError(error); throw error; } }
     async function loadFiles(folder="") {
-      state.folder=folder; setText("tree-path", folder || "/"); listState($("file-list"),"Loading folder","Reading indexed entries…");
+      state.folder=folder; setText("tree-path", folder || "/"); setText("folder-context", `Current folder: ${folder || "/"}`); listState($("file-list"),"Loading folder","Reading indexed entries…");
       try { const data=await api("/api/files",{path:folder}); const entries=Array.isArray(data.entries)?data.entries:[]; const list=$("file-list"); list.replaceChildren();
         if (folder) { const li=document.createElement("li"), up=document.createElement("button"); up.className="file-row"; up.type="button"; up.append(document.createTextNode("↰"),document.createTextNode("Parent folder"),document.createTextNode("")); up.addEventListener("click",()=>loadFiles(folder.split("/").slice(0,-1).join("/"))); li.append(up); list.append(li); }
         entries.forEach(entry=>{const li=document.createElement("li"),button=document.createElement("button"),icon=document.createElement("span"),name=document.createElement("span"),size=document.createElement("small"); button.type="button"; button.className="file-row"; button.dataset.path=entry.path; icon.textContent=entry.type==="directory"||entry.type==="folder"?"▸":"·"; name.textContent=entry.name || entry.path; size.textContent=entry.type==="directory"||entry.type==="folder"?"":bytes(entry.size); button.append(icon,name,size); button.addEventListener("click",()=>entry.type==="directory"||entry.type==="folder"?loadFiles(entry.path):loadPreview(entry.path)); li.append(button); list.append(li); });
-        if (!entries.length && !folder) listState(list,"Library is empty","Reindex this root to discover files.");
-      } catch(error) { listState($("file-list"),"Could not load files",errorMessage(error)); showError(error); }
+        if (!entries.length) listState(list,folder?"Folder is empty":"Library is empty",folder?"No indexed entries in this folder.":"Reindex this root to discover files.");
+      } catch(error) { listState($("file-list"),error.message.includes("timed out")?"Folder request timed out":"Could not load files",`${errorMessage(error)} Retry with Refresh.`); showError(error); }
     }
     function previewText(data) {
       const container=$("preview"); container.replaceChildren(); const meta=document.createElement("div"); meta.className="preview-meta";
@@ -210,26 +214,30 @@ const INDEX_HTML: &str = r##"<!doctype html>
       matches.forEach(match=>{const start=Math.max(cursor,Number(match.start)||0), end=Math.min(content.length,Number(match.end)||0); if(end<=start)return; pre.append(document.createTextNode(content.slice(cursor,start))); const mark=document.createElement("mark"); mark.textContent=content.slice(start,end); pre.append(mark); cursor=end;}); pre.append(document.createTextNode(content.slice(cursor))); container.append(pre);
     }
     async function loadPreview(path) { state.selected=path; document.querySelectorAll("[data-path]").forEach(el=>el.setAttribute("aria-current",String(el.dataset.path===path))); $("download").disabled=false; $("reveal").disabled=false; $("preview").replaceChildren(); const loading=document.createElement("div"); loading.className="state busy"; loading.textContent="Loading preview"; $("preview").append(loading);
-      try { previewText(await api("/api/preview",{path,q:state.query})); } catch(error) { $("preview").replaceChildren(); const box=document.createElement("div"); box.className="state"; box.textContent=errorMessage(error); $("preview").append(box); showError(error); }
+      try { previewText(await api("/api/preview",{path,q:state.query})); } catch(error) { $("preview").replaceChildren(); const box=document.createElement("div"); box.className="state"; const strong=document.createElement("strong"); strong.textContent=error.message.includes("timed out")?"Preview request timed out":"Preview failed"; box.append(strong,document.createTextNode(`${errorMessage(error)} Retry by selecting the file again.`)); $("preview").append(box); showError(error); }
     }
     function renderResults(data) { const candidates=Array.isArray(data.candidates)?data.candidates:[]; const list=$("results"); list.replaceChildren(); setText("confidence",data.confidence?`${data.confidence} confidence`:""); setText("results-meta",`${candidates.length} result${candidates.length===1?"":"s"} for “${state.query}”`);
       if(!candidates.length){listState(list,"No indexed match","Try a shorter phrase, a filename fragment, or reindex the root.");return;}
       candidates.forEach((item,index)=>{const li=document.createElement("li"),button=document.createElement("button"),score=document.createElement("span"),title=document.createElement("strong"),path=document.createElement("div"),evidence=document.createElement("div"); button.type="button";button.className="result";button.dataset.path=item.path;score.className="score";score.textContent=Number.isFinite(Number(item.score))?Number(item.score).toFixed(2):`#${index+1}`;title.textContent=item.name||item.path;path.className="path";path.textContent=item.path;evidence.className="evidence";evidence.textContent=item.preview_snippet || (Array.isArray(item.evidence)?item.evidence[0]:"") || (Array.isArray(item.reasons)?item.reasons.join(" · "):"");button.append(score,title,path,evidence);button.addEventListener("click",()=>loadPreview(item.path));li.append(button);list.append(li);});
     }
-    async function find(event) { event.preventDefault(); const q=$("query").value.trim(); if(!q) { state.query=""; clearError(); setText("results-meta",""); setText("confidence",""); listState($("results"),"Enter a search phrase","Type a filename, topic, or person above."); return; } state.query=q; clearError(); const button=$("search-button"); button.disabled=true; button.classList.add("busy"); listState($("results"),"Finding evidence","Searching the active index…"); try { renderResults(await api("/api/find",{q,top_k:10})); } catch(error) { listState($("results"),"Search failed",errorMessage(error)); showError(error); } finally { button.disabled=false;button.classList.remove("busy"); } }
+    async function find(event) { event.preventDefault(); const q=$("query").value.trim(); if(!q) { state.query=""; clearError(); setText("results-meta",""); setText("confidence",""); listState($("results"),"Enter a search phrase","Type a filename, topic, or person above."); return; } state.query=q; clearError(); const button=$("search-button"); button.disabled=true; button.classList.add("busy"); listState($("results"),"Finding evidence","Searching the active index…"); try { renderResults(await api("/api/find",{q,top_k:10})); } catch(error) { listState($("results"),error.message.includes("timed out")?"Search timed out":"Search failed",`${errorMessage(error)} Retry the search.`); showError(error); } finally { button.disabled=false;button.classList.remove("busy"); } }
     $("search-form").addEventListener("submit", find);
+    $("root-select").addEventListener("change", switchRoot);
     async function switchRoot() { const path=$("root-select").value; if(!path)return; try { const data=await api("/api/root",{path,token:token()},{method:"POST"}); state.root=data.root||path;state.folder="";state.selected="";updateStats(data);await loadFiles();toast("Active root changed."); } catch(error){showError(error);} }
     function confirmAction(title,copy,label,action){setText("confirm-title",title);setText("confirm-copy",copy);setText("confirm-ok",label);state.confirmAction=action;$("confirm-dialog").showModal();}
-    async function mutation(path, values, label) { clearError(); const button=$(label); button.disabled=true;button.classList.add("busy"); try { const data=await api(path,{...values,token:token()},{method:"POST"}); if(data.prepared!==undefined)updateStats(data);await Promise.all([loadRoots(),loadFiles()]);toast(`${button.textContent.trim()} complete.`); } catch(error){showError(error);} finally {button.disabled=false;button.classList.remove("busy");} }
+    async function mutation(path, values, label) { clearError(); const button=$(label); button.disabled=true;button.classList.add("busy"); try { const data=await api(path,{...values,token:token()},{method:"POST"}); if(data.prepared!==undefined)updateStats(data); await Promise.all([loadRoots(),loadFiles(state.folder)]); toast(`${button.textContent.trim()} complete.`); } catch(error){showError(error);} finally {button.disabled=false;button.classList.remove("busy");} }
     $("refresh").addEventListener("click",()=>mutation("/api/refresh",{},"refresh"));
     $("reindex").addEventListener("click",()=>mutation("/api/reindex",{},"reindex"));
+    $("reindex-folder").addEventListener("click",()=>mutation("/api/reindex-folder",{path:state.folder},"reindex-folder"));
     $("deep-index").addEventListener("click",()=>mutation("/api/deep-index",{},"deep-index"));
+    $("deep-target-enable").addEventListener("click",()=>mutation("/api/deep-index-target",{path:state.folder,enabled:true},"deep-target-enable"));
+    $("deep-target-disable").addEventListener("click",()=>mutation("/api/deep-index-target",{path:state.folder,enabled:false},"deep-target-disable"));
+    $("remove-folder").addEventListener("click",()=>confirmAction("Remove indexed folder?",`This removes ${state.folder || "/"} from Jikji's index. Source files are not deleted.`,"Remove folder",()=>mutation("/api/remove-folder",{path:state.folder},"remove-folder")));
     $("remove-root").addEventListener("click",()=>confirmAction("Remove indexed root?",`This removes ${state.root} from Jikji's central index. Source files are not deleted.`,"Remove root",()=>mutation("/api/remove-root",{path:state.root},"remove-root")));
     $("confirm-cancel").addEventListener("click",()=>$("confirm-dialog").close()); $("confirm-ok").addEventListener("click",()=>{const action=state.confirmAction;$("confirm-dialog").close();state.confirmAction=null;if(action)action();});
     $("download").addEventListener("click",()=>{if(state.selected)location.assign(`/download?${params({path:state.selected})}`);});
     $("reveal").addEventListener("click",async()=>{try{await api("/reveal",{path:state.selected,token:token()},{method:"POST"});toast("Opened in your file manager.");}catch(error){showError(error);}});
-    Promise.all([loadRoots(),loadStatus()]).then(()=>loadFiles()).catch(error=>{showError(error);listState($("file-list"),"Jikji is unavailable",errorMessage(error));});
-  })();
+    Promise.all([loadRoots(),loadStatus()]).then(()=>loadFiles()).catch(error=>{setText("health","Error");showError(error);listState($("file-list"),error.message.includes("timed out")?"Jikji request timed out":"Jikji is unavailable",`${errorMessage(error)} Retry with Refresh.`);});
   </script>
 </body>
 </html>"##;
@@ -398,9 +406,14 @@ mod tests {
         for control in [
             "id=\"search-form\"",
             "id=\"root-select\"",
+            "id=\"folder-context\"",
             "id=\"refresh\"",
             "id=\"reindex\"",
+            "id=\"reindex-folder\"",
             "id=\"deep-index\"",
+            "id=\"deep-target-enable\"",
+            "id=\"deep-target-disable\"",
+            "id=\"remove-folder\"",
             "id=\"remove-root\"",
             "id=\"download\"",
             "id=\"reveal\"",
@@ -424,12 +437,23 @@ mod tests {
             "/api/root",
             "/api/refresh",
             "/api/reindex",
+            "/api/reindex-folder",
             "/api/deep-index",
+            "/api/deep-index-target",
+            "/api/remove-folder",
             "/api/remove-root",
             "/download",
             "/reveal",
         ] {
             assert!(INDEX_HTML.contains(route), "missing route: {route}");
+        }
+        for state in [
+            "Request timed out",
+            "Search failed",
+            "Folder is empty",
+            "Current folder:",
+        ] {
+            assert!(INDEX_HTML.contains(state), "missing state text: {state}");
         }
         assert!(INDEX_HTML.contains("token:token()"));
         assert!(INDEX_HTML.contains("textContent"));

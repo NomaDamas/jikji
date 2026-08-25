@@ -13,7 +13,8 @@ use std::time::UNIX_EPOCH;
 use jikji_core::PrepareOptions;
 use jikji_core::storage::{
     clear_artifact, database_path, delete_root_by_key, indexed_roots, load_artifact,
-    load_artifacts, migrate_legacy, register_root, root_key, root_statistics, store_artifact,
+    load_artifacts, migrate_legacy, register_root, remove_artifacts_under, root_key,
+    root_statistics, store_artifact,
 };
 use jikji_index::{doctor, prepare};
 use jikji_search::{DiscoverOptions, SearchOptions, discover, search};
@@ -87,6 +88,15 @@ pub(crate) fn route_request(
         ("POST", "/open") => management_response(state, &request.query, open_response),
         ("POST", "/reveal") => management_response(state, &request.query, reveal_response),
         ("POST", "/api/refresh") => management_response(state, &request.query, refresh_response),
+        ("POST", "/api/reindex-folder") => {
+            management_response(state, &request.query, reindex_folder_response)
+        }
+        ("POST" | "DELETE", "/api/remove-folder") => {
+            management_response(state, &request.query, remove_folder_response)
+        }
+        ("POST" | "DELETE", "/api/deep-index-target") => {
+            management_response(state, &request.query, deep_index_target_response)
+        }
         ("POST", "/api/reindex") => management_response(state, &request.query, reindex_response),
         ("POST", "/api/deep-index") => {
             management_response(state, &request.query, deep_index_response)
@@ -567,20 +577,93 @@ fn deep_index_response(state: &GuiState, _query: &str) -> HttpResponse {
     };
     with_root(state, |root| match prepare(root, &options) {
         Ok(result) => {
-            let status = json!({
-                "state": "completed",
-                "root": root,
-                "files": result.files,
-                "documents": result.docs_parsed,
-                "media_index": true,
-                "deep_archive_index": true
-            });
+            let status = json!({"state":"completed","root":root,"files":result.files,"documents":result.docs_parsed,"media_index":true,"deep_archive_index":true});
             match store_artifact(root, "deep_index_status", status) {
                 Ok(()) => root_status(root),
                 Err(error) => HttpResponse::json(500, json!({"error": error.to_string()})),
             }
         }
         Err(error) => HttpResponse::json(500, json!({"error": error.to_string()})),
+    })
+}
+
+fn folder_query_path(
+    root: &Path,
+    query: &str,
+) -> std::result::Result<(String, PathBuf), HttpResponse> {
+    let rel = query_value(query, "path")
+        .ok_or_else(|| HttpResponse::json(400, json!({"error": "missing path"})))?;
+    let path = resolve_root_path(root, &rel)?;
+    if !path.is_dir() {
+        return Err(HttpResponse::json(
+            400,
+            json!({"error": "path is not a directory"}),
+        ));
+    }
+    Ok((rel.trim_matches('/').to_owned(), path))
+}
+
+fn reindex_folder_response(state: &GuiState, query: &str) -> HttpResponse {
+    with_root(state, |root| {
+        let (rel, _) = match folder_query_path(root, query) {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+        match prepare(root, &PrepareOptions::default()) {
+            Ok(result) => HttpResponse::json(
+                200,
+                json!({"root":root,"path":rel,"action":"reindex","state":"completed","files":result.files,"documents":result.docs_parsed,"statistics":root_statistics(root).ok()}),
+            ),
+            Err(error) => HttpResponse::json(
+                500,
+                json!({"error":error.to_string(),"root":root,"path":rel,"action":"reindex","state":"failed"}),
+            ),
+        }
+    })
+}
+
+fn remove_folder_response(state: &GuiState, query: &str) -> HttpResponse {
+    with_root(state, |root| {
+        let (rel, _) = match folder_query_path(root, query) {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+        match remove_artifacts_under(root, &rel) {
+            Ok(removed) => HttpResponse::json(
+                200,
+                json!({"root":root,"path":rel,"action":"remove","state":"completed","removed":removed,"source_preserved":true,"statistics":root_statistics(root).ok()}),
+            ),
+            Err(error) => HttpResponse::json(500, json!({"error":error.to_string()})),
+        }
+    })
+}
+
+fn deep_index_target_response(state: &GuiState, query: &str) -> HttpResponse {
+    with_root(state, |root| {
+        let (rel, _) = match folder_query_path(root, query) {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+        let enabled = query_value(query, "enabled").is_none_or(|v| v != "false")
+            && query_bool(query, "enabled");
+        let mut status = load_artifact(root, "deep_index_targets")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| json!({"targets":[]}));
+        let Some(targets) = status.get_mut("targets").and_then(|v| v.as_array_mut()) else {
+            return HttpResponse::json(500, json!({"error":"invalid deep index target state"}));
+        };
+        targets.retain(|v| v.as_str() != Some(rel.as_str()));
+        if enabled {
+            targets.push(json!(rel.clone()));
+        }
+        match store_artifact(root, "deep_index_targets", status) {
+            Ok(()) => HttpResponse::json(
+                200,
+                json!({"root":root,"path":rel,"action":"deep-index-target","state":if enabled {"enabled"} else {"disabled"},"enabled":enabled,"statistics":root_statistics(root).ok()}),
+            ),
+            Err(error) => HttpResponse::json(500, json!({"error":error.to_string()})),
+        }
     })
 }
 

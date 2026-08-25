@@ -238,6 +238,55 @@ pub fn clear_artifact(root: &Path, kind: &str) -> Result<()> {
         .map_err(sqlite_error_path)?;
     Ok(())
 }
+/// Remove only central-index rows below a root-relative path; source files remain untouched.
+/// Rebuilding the retained rows in one transaction preserves per-root isolation and atomicity.
+pub fn remove_artifacts_under(root: &Path, prefix: &str) -> Result<usize> {
+    let mut connection = open_database()?;
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(0);
+    };
+    let normalized = prefix.trim_matches('/');
+    let tx = connection.transaction().map_err(sqlite_error_path)?;
+    let mut statement = tx
+        .prepare("SELECT kind, row_json FROM artifacts WHERE root_id=?1 ORDER BY kind, ordinal")
+        .map_err(sqlite_error_path)?;
+    let rows = statement
+        .query_map([root_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_error_path)?;
+    let mut retained = Vec::new();
+    let mut removed = 0usize;
+    for row in rows {
+        let (kind, raw) = row.map_err(sqlite_error_path)?;
+        let value: Value = serde_json::from_str(&raw)
+            .map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
+        let path = value
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let matches = normalized.is_empty()
+            || path == normalized
+            || path.starts_with(&format!("{normalized}/"));
+        if matches {
+            removed += 1;
+        } else {
+            retained.push((kind, raw));
+        }
+    }
+    drop(statement);
+    tx.execute("DELETE FROM artifacts WHERE root_id=?1", [root_id])
+        .map_err(sqlite_error_path)?;
+    for (kind, raw) in retained {
+        tx.execute(
+            "INSERT INTO artifacts(root_id, kind, row_json) VALUES(?1, ?2, ?3)",
+            rusqlite::params![root_id, kind, raw],
+        )
+        .map_err(sqlite_error_path)?;
+    }
+    tx.commit().map_err(sqlite_error_path)?;
+    Ok(removed)
+}
 
 pub fn delete_root(root: &Path) -> Result<bool> {
     let canonical = root_key(root)?;
