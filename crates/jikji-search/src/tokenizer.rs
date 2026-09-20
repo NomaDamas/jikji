@@ -234,7 +234,7 @@ fn duplicate_stem(name: &str) -> String {
     }
 }
 
-fn is_token_continue(ch: char) -> bool {
+pub(crate) fn is_token_continue(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || is_cjk(ch) || matches!(ch, '_' | '.' | '+' | '-')
 }
 

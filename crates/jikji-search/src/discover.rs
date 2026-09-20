@@ -13,9 +13,9 @@ use crate::discover_contract::{
 use crate::discover_query::{
     anchor_tokens, classify_query, retry_proof_for, strategy_variants, strip_shell_noise,
 };
-use crate::searcher::{SearchCandidate, SearchOptions, search};
+use crate::searcher::{search, SearchCandidate, SearchOptions};
 use jikji_core::Result;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoverOptions {
@@ -241,7 +241,8 @@ fn merge_candidates(
     top_k: usize,
 ) -> Result<(Vec<SearchCandidate>, Vec<Value>)> {
     let mut merged = BTreeMap::<String, SearchCandidate>::new();
-    let anchors = anchor_tokens(variants.first().map_or("", |(_, query)| query));
+    let original_query = variants.first().map_or("", |(_, query)| query);
+    let anchors = anchor_tokens(original_query);
     let mut strategy_results = Vec::new();
     for (variant_idx, (strategy, variant)) in variants.iter().enumerate() {
         let results = search(
@@ -264,7 +265,15 @@ fn merge_candidates(
             })).collect::<Vec<_>>(),
         }));
         for (rank, item) in results.into_iter().enumerate() {
-            merge_candidate(&mut merged, item, variant, variant_idx, rank, &anchors);
+            merge_candidate(
+                &mut merged,
+                item,
+                variant,
+                variant_idx,
+                rank,
+                &anchors,
+                original_query,
+            );
         }
     }
     let mut out = merged.into_values().collect::<Vec<_>>();
@@ -334,8 +343,9 @@ fn merge_candidate(
     variant_idx: usize,
     rank: usize,
     anchors: &[String],
+    query: &str,
 ) {
-    let weighted = weighted_score(&item, variant_idx, rank, anchors);
+    let weighted = weighted_score(&item, variant_idx, rank, anchors, query);
     merged
         .entry(item.path.clone())
         .and_modify(|existing| {
@@ -375,6 +385,7 @@ fn weighted_score(
     variant_idx: usize,
     rank: usize,
     anchors: &[String],
+    query: &str,
 ) -> f64 {
     let mut weighted = item.score / ((rank + 1) as f64).powf(0.35);
     if variant_idx > 0 {
@@ -385,13 +396,114 @@ fn weighted_score(
         .iter()
         .filter(|anchor| path_folded.contains(anchor.as_str()))
         .count();
-    if anchor_hits >= 2 {
+    weighted = if anchor_hits >= 2 {
         weighted * (12.0 + anchor_hits as f64) + 150_000.0 * anchor_hits as f64
     } else if anchor_hits == 1 {
         weighted * 8.0 + 50_000.0
     } else {
         weighted
+    };
+    weighted
+        * generated_search_path_weight(&item.path)
+        * extension_hint_weight(query, &item.path)
+        * archive_search_path_weight(query, &item.path)
+}
+
+fn generated_search_path_weight(path: &str) -> f64 {
+    if generated_search_path(path) {
+        0.02
+    } else {
+        1.0
     }
+}
+
+fn archive_search_path_weight(query: &str, path: &str) -> f64 {
+    if query_has_hint(&query.to_lowercase(), &["zip", "tar", "tgz", "7z", "rar"]) {
+        return 1.0;
+    }
+    let lower = path.to_lowercase();
+    if lower.ends_with(".zip")
+        || lower.ends_with(".tar")
+        || lower.ends_with(".tgz")
+        || lower.ends_with(".tar.gz")
+        || lower.ends_with(".7z")
+        || lower.ends_with(".rar")
+    {
+        0.05
+    } else {
+        1.0
+    }
+}
+
+fn extension_hint_weight(query: &str, path: &str) -> f64 {
+    let hints = extension_hints_from_query(query);
+    if hints.is_empty() {
+        return 1.0;
+    }
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if hints.iter().any(|hint| hint == &ext) {
+        8.0
+    } else {
+        0.25
+    }
+}
+
+fn extension_hints_from_query(query: &str) -> Vec<&'static str> {
+    let q = query.to_lowercase();
+    let mut hints = Vec::new();
+    if query_has_hint(&q, &["발표자료", "파워포인트", "pptx", "ppt"]) {
+        hints.extend(["pptx", "ppt"]);
+    }
+    if query_has_hint(&q, &["한글", "hwp", "hwpx"]) {
+        hints.extend(["hwp", "hwpx"]);
+    }
+    if query_has_hint(&q, &["워드", "docx", "doc"]) {
+        hints.extend(["docx", "doc"]);
+    }
+    if query_has_hint(&q, &["pdf"]) {
+        hints.push("pdf");
+    }
+    if query_has_hint(&q, &["markdown", "마크다운", "md"]) {
+        hints.push("md");
+    }
+    hints.sort_unstable();
+    hints.dedup();
+    hints
+}
+
+fn query_has_hint(query: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| {
+        if !needle.is_ascii() {
+            query.contains(needle)
+        } else {
+            query
+                .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+                .any(|token| token.eq_ignore_ascii_case(needle))
+        }
+    })
+}
+
+fn generated_search_path(path: &str) -> bool {
+    path.replace('\\', "/").split('/').any(|part| {
+        matches!(
+            part,
+            "target"
+                | "node_modules"
+                | "__pycache__"
+                | ".venv"
+                | "site-packages"
+                | "dist-packages"
+                | "dist"
+                | "build"
+        ) || part.ends_with(".egg-info")
+            || part
+                .strip_prefix("tent.")
+                .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit()))
+    })
 }
 
 #[cfg(test)]
@@ -425,5 +537,36 @@ mod lite_tests {
             "expected expanded variants, got {:?}",
             request.variants
         );
+    }
+
+    #[test]
+    fn generated_search_path_detects_build_and_worktree_copies() {
+        assert!(generated_search_path(
+            "target/doc/jikji/search_commands/fn.start_background_refresh.html"
+        ));
+        assert!(generated_search_path(
+            "tent.1/crates/jikji-agent/Cargo.toml"
+        ));
+        assert!(!generated_search_path(
+            "crates/jikji-search/tests/search_find_parity.rs"
+        ));
+    }
+
+    #[test]
+    fn presentation_query_prefers_pptx_over_other_extensions() {
+        assert_eq!(
+            extension_hints_from_query("정의서 발표자료"),
+            vec!["ppt", "pptx"]
+        );
+        assert!(extension_hint_weight("정의서 발표자료", "목표모델 정의서.pptx") > 1.0);
+        assert!(extension_hint_weight("정의서 발표자료", "요구사항정의서.hwp") < 1.0);
+        assert!(!query_has_hint("admin", &["md"]));
+    }
+
+    #[test]
+    fn archive_paths_are_downweighted_unless_query_asks() {
+        assert!(archive_search_path_weight("종료감리 문서산출물", "산출물.zip") < 1.0);
+        assert_eq!(archive_search_path_weight("산출물 zip", "산출물.zip"), 1.0);
+        assert_eq!(archive_search_path_weight("종료감리", "산출물.pptx"), 1.0);
     }
 }

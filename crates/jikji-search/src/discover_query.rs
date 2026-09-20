@@ -3,6 +3,8 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+use crate::tokenizer::is_token_continue;
+
 pub(crate) fn strip_shell_noise(query: &str) -> String {
     let noise = shell_noise();
     query
@@ -66,6 +68,11 @@ fn semantic_expansion(query: &str) -> String {
         ("계약", "협약 조항"),
         ("갱신", "연장 재계약"),
         ("회의", "회의록 안건 메모"),
+        ("한글", "hwp hwpx"),
+        ("발표자료", "pptx ppt 슬라이드"),
+        ("워드", "docx"),
+        ("제안서", "제안 rfp"),
+        ("보고서", "리포트 report"),
     ];
     for (needle, expansion) in expansions {
         if lower.contains(needle) {
@@ -113,6 +120,14 @@ pub(crate) fn classify_query(query: &str) -> String {
         "pdf",
         "document",
         "file",
+        "한글",
+        "계약",
+        "제안서",
+        "보고서",
+        "발표자료",
+        "워드",
+        "공문",
+        "사용매뉴얼",
     ]
     .iter()
     .any(|hint| folded.contains(hint))
@@ -139,8 +154,8 @@ pub(crate) fn retry_proof_for(root: &Path, query: &str, top_k: usize) -> String 
 
 pub(crate) fn anchor_tokens(query: &str) -> Vec<String> {
     query
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|token| token.len() >= 2)
+        .split(|ch: char| !is_token_continue(ch))
+        .filter(|token| token.chars().count() >= 2)
         .flat_map(|token| {
             let mut out = vec![token.to_lowercase()];
             if let Some(year) = token
@@ -161,6 +176,26 @@ pub(crate) fn anchor_tokens(query: &str) -> Vec<String> {
 }
 
 fn generic_anchor(token: &str) -> bool {
+    let lower = token.to_lowercase();
+    if matches!(
+        lower.as_str(),
+        "한글"
+            | "문서"
+            | "파일"
+            | "폴더"
+            | "자료"
+            | "소스"
+            | "관련"
+            | "내용"
+            | "워드"
+            | "텍스트"
+            | "발표자료"
+            | "markdown"
+            | "python"
+            | "rust"
+    ) {
+        return true;
+    }
     matches!(
         token.to_ascii_uppercase().as_str(),
         "CEO"
@@ -169,6 +204,8 @@ fn generic_anchor(token: &str) -> bool {
             | "CTO"
             | "DOC"
             | "DOCX"
+            | "HWP"
+            | "HWPX"
             | "INC"
             | "LLC"
             | "NDA"
@@ -188,4 +225,45 @@ fn shell_noise() -> BTreeSet<&'static str> {
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{anchor_tokens, classify_query, strategy_variants};
+
+    #[test]
+    fn anchor_tokens_keep_hangul_and_drop_type_words() {
+        let anchors = anchor_tokens("정의서 발표자료");
+        assert!(
+            anchors.iter().any(|token| token == "정의서"),
+            "expected hangul filename token, got {anchors:?}"
+        );
+        assert!(
+            !anchors.iter().any(|token| token == "발표자료"),
+            "type words should not be anchors: {anchors:?}"
+        );
+    }
+
+    #[test]
+    fn anchor_tokens_keep_snake_case_identifiers() {
+        let anchors = anchor_tokens("isolate_data_dir");
+        assert_eq!(anchors, vec!["isolate_data_dir".to_owned()]);
+    }
+
+    #[test]
+    fn korean_document_query_is_single_file() {
+        assert_eq!(classify_query("산업지원 제안서"), "single_file");
+        assert_eq!(classify_query("한글 문서"), "single_file");
+    }
+
+    #[test]
+    fn korean_query_gets_lexical_anchors_variant() {
+        let variants = strategy_variants("근대역사자료번역요약모델 한글 문서");
+        assert!(
+            variants.iter().any(|(name, value)| {
+                name == "lexical_anchors" && value.contains("근대역사자료번역요약모델")
+            }),
+            "expected lexical_anchors with hangul stem, got {variants:?}"
+        );
+    }
 }
