@@ -210,10 +210,13 @@ fn source_tree_signature(root: &Path, files: &[PathBuf], dirs: &[PathBuf]) -> So
 }
 
 pub(crate) fn rel_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/")
+    jikji_core::path_text(
+        &path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/"),
+    )
 }
 
 pub(crate) fn metadata_mtime_ns(metadata: &fs::Metadata) -> u128 {

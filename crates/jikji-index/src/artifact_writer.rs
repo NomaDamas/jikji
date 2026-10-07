@@ -87,17 +87,19 @@ pub(crate) fn write_static_artifacts(
         index_dir.join("autorag_manifest.json"),
         &json!({"schema_version": 1}),
     )?;
-    write_markdown_files(scan, &manifest)
+    write_markdown_files(scan, &manifest, options.skip_root_map)
 }
 
-fn write_markdown_files(scan: &ScanResult, manifest: &Value) -> Result<()> {
+fn write_markdown_files(scan: &ScanResult, manifest: &Value, skip_root_map: bool) -> Result<()> {
     let index_dir = root_storage_dir(&scan.root)?;
     let map = agent_map(scan, manifest);
     replace_artifacts(&scan.root, &[("agent_map", json!({"markdown": map}))])?;
     fs::write(index_dir.join("agent_map.md"), &map)
         .map_err(|source| io_error(index_dir.join("agent_map.md"), source))?;
-    fs::write(scan.root.join(ROOT_AGENT_MAP), &map)
-        .map_err(|source| io_error(scan.root.join(ROOT_AGENT_MAP), source))?;
+    if !skip_root_map {
+        fs::write(scan.root.join(ROOT_AGENT_MAP), &map)
+            .map_err(|source| io_error(scan.root.join(ROOT_AGENT_MAP), source))?;
+    }
     fs::write(
         index_dir.join("agent_routes.md"),
         "# Jikji Agent Routes\n\nUse `.jikji/file_index.jsonl` first.\n",

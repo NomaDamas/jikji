@@ -25,7 +25,7 @@ pub(crate) fn file_rows(scan: &ScanResult, _options: &PrepareOptions) -> Result<
             Ok(json!({
                 "status": "current",
                 "path": rel,
-                "name": path.file_name().and_then(|name| name.to_str()).unwrap_or(""),
+                "name": jikji_core::path_text(path.file_name().and_then(|name| name.to_str()).unwrap_or("")),
                 "ext": dotted_ext(&ext),
                 "mime": mime_for(&ext),
                 "size": metadata.len(),
@@ -188,7 +188,7 @@ fn folder_row(scan: &ScanResult, path: &Path) -> Value {
         .filter_map(|dir| {
             dir.file_name()
                 .and_then(|name| name.to_str())
-                .map(str::to_owned)
+                .map(jikji_core::path_text)
         })
         .collect::<Vec<_>>();
     let direct_files = scan
@@ -211,7 +211,7 @@ fn folder_row(scan: &ScanResult, path: &Path) -> Value {
     json!({
         "folder_id": folder_id(&rel),
         "path": rel,
-        "name": path.file_name().and_then(|name| name.to_str()).unwrap_or("."),
+        "name": jikji_core::path_text(path.file_name().and_then(|name| name.to_str()).unwrap_or(".")),
         "status": "current",
         "depth": folder_depth(&rel),
         "file_count_direct": direct_files.len(),

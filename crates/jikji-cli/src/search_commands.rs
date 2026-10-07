@@ -117,7 +117,8 @@ pub(crate) fn run_brief(args: BriefArgs) -> jikji_core::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn run_find(args: FindArgs) -> jikji_core::Result<ExitCode> {
+pub(crate) fn run_find(mut args: FindArgs) -> jikji_core::Result<ExitCode> {
+    args.query = jikji_core::nfc_text(&args.query);
     let prepare_options = find_prepare_options(&args);
     let mut prepared = maybe_prepare_for_search(
         &args.root,
@@ -165,7 +166,8 @@ pub(crate) fn run_find(args: FindArgs) -> jikji_core::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn run_discover(args: FindArgs) -> jikji_core::Result<ExitCode> {
+pub(crate) fn run_discover(mut args: FindArgs) -> jikji_core::Result<ExitCode> {
+    args.query = jikji_core::nfc_text(&args.query);
     let prepare_options = find_prepare_options(&args);
     let mut prepared = maybe_prepare_for_search(
         &args.root,

@@ -185,7 +185,6 @@ pub fn ensure_prepare_root_allowed(root: &Path) -> Result<()> {
     Ok(())
 }
 
-
 fn unresolved_root_keys(root: &Path) -> Vec<String> {
     let mut keys = Vec::new();
     push_unresolved_key(&mut keys, root);
@@ -196,6 +195,15 @@ fn unresolved_root_keys(root: &Path) -> Vec<String> {
         push_unresolved_key(&mut keys, &target);
         if let Ok(absolute) = std::path::absolute(&target) {
             push_unresolved_key(&mut keys, &absolute);
+        }
+    }
+    // A typed path may differ from the registered (canonical) key only in
+    // Unicode normalization: macOS stores NFD names, typed paths are usually
+    // NFC. Add both spellings without touching the file system.
+    for key in keys.clone() {
+        use unicode_normalization::UnicodeNormalization;
+        for variant in [key.nfc().collect::<String>(), key.nfd().collect::<String>()] {
+            push_unresolved_key(&mut keys, Path::new(&variant));
         }
     }
     keys
