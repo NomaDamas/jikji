@@ -38,6 +38,9 @@ pub(crate) struct PrepareArgs {
     pub(crate) archive_max_total_bytes: u64,
     #[arg(long)]
     pub(crate) no_agent_rules: bool,
+    /// Do not write `.jikji_agent_map.md` into ROOT (the map stays in the data dir).
+    #[arg(long)]
+    pub(crate) no_root_map: bool,
     #[arg(long, hide = true)]
     pub(crate) search_only: bool,
 }

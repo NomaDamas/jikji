@@ -109,6 +109,9 @@ pub struct PrepareOptions {
     pub archive_max_entry_bytes: u64,
     #[serde(default = "default_archive_max_total_bytes")]
     pub archive_max_total_bytes: u64,
+    /// Do not write `.jikji_agent_map.md` into the prepared root.
+    #[serde(default)]
+    pub skip_root_map: bool,
 }
 
 fn default_archive_max_entries() -> usize {
@@ -138,6 +141,7 @@ impl Default for PrepareOptions {
             archive_max_entries: default_archive_max_entries(),
             archive_max_entry_bytes: default_archive_max_entry_bytes(),
             archive_max_total_bytes: default_archive_max_total_bytes(),
+            skip_root_map: false,
         }
     }
 }
@@ -166,6 +170,24 @@ pub fn generated_artifact_manifest() -> ManifestStub {
     ManifestStub {
         schema_version: 1,
         generated_artifacts,
+    }
+}
+
+/// NFC-normalize free text such as search queries so they compare equal to
+/// indexed text regardless of how the caller's input method composed it.
+pub fn nfc_text(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    text.nfc().collect()
+}
+
+/// macOS file systems hand back decomposed (NFD) names, while typed queries and
+/// parsed document text are composed (NFC). APFS and HFS+ resolve either form,
+/// so index path text in NFC there; other platforms keep names byte-exact.
+pub fn path_text(text: &str) -> String {
+    if cfg!(target_os = "macos") {
+        nfc_text(text)
+    } else {
+        text.to_owned()
     }
 }
 

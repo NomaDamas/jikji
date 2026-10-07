@@ -11,6 +11,7 @@ pub(crate) fn find_prepare_options(args: &FindArgs) -> PrepareOptions {
         exclude_patterns: args.exclude.clone(),
         max_hash_bytes: args.max_hash_bytes,
         parse_timeout_seconds: args.parse_timeout,
+        skip_root_map: true,
         ..PrepareOptions::default()
     }
 }
@@ -23,6 +24,7 @@ pub(crate) fn search_prepare_options(args: &SearchArgs) -> PrepareOptions {
         exclude_patterns: args.exclude.clone(),
         max_hash_bytes: args.max_hash_bytes,
         parse_timeout_seconds: args.parse_timeout,
+        skip_root_map: true,
         ..PrepareOptions::default()
     }
 }
@@ -35,6 +37,7 @@ pub(crate) fn brief_prepare_options(args: &BriefArgs) -> PrepareOptions {
         exclude_patterns: args.exclude.clone(),
         max_hash_bytes: args.max_hash_bytes,
         parse_timeout_seconds: args.parse_timeout,
+        skip_root_map: true,
         ..PrepareOptions::default()
     }
 }

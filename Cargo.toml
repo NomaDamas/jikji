@@ -29,6 +29,7 @@ sha2 = "0.10.9"
 getrandom = "0.4.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 thiserror = "2.0.17"
+unicode-normalization = "0.1"
 tempfile = "3"
 jikji-agent = { path = "crates/jikji-agent", version = "0.1.1" }
 jikji-core = { path = "crates/jikji-core", version = "0.1.1" }
