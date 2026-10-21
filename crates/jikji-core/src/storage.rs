@@ -818,9 +818,23 @@ fn initialize(connection: &Connection, path: &Path) -> Result<()> {
             original_len INTEGER NOT NULL CHECK(original_len >= 0),
             PRIMARY KEY(artifact_ordinal, field_name)
         );
-        INSERT INTO metadata(key,value) VALUES('schema_version','{DATABASE_SCHEMA_VERSION}') ON CONFLICT(key) DO UPDATE SET value=excluded.value;
     "#))
-    .map_err(|source| sqlite_error(path, source))
+    .map_err(|source| sqlite_error(path, source))?;
+    // Write only when the stored version differs: an unconditional upsert makes every read-only
+    // consumer (`jikji find`) take SQLite's single write lock and queue behind a running `prepare`.
+    let stored: Option<String> = connection
+        .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+        .optional()
+        .map_err(|source| sqlite_error(path, source))?;
+    if stored.as_deref() != Some(DATABASE_SCHEMA_VERSION.to_string().as_str()) {
+        connection
+            .execute(
+                "INSERT INTO metadata(key,value) VALUES('schema_version',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [DATABASE_SCHEMA_VERSION.to_string()],
+            )
+            .map_err(|source| sqlite_error(path, source))?;
+    }
+    Ok(())
 }
 
 fn empty_statistics() -> RootStatistics {
@@ -908,5 +922,64 @@ mod cloud_drive_tests {
         assert!(cloud_drive_path_blocked(&link.join("마커")));
         assert!(!cloud_drive_path_blocked(&tmp.join("Documents/notes")));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod initialize_tests {
+    use super::{DATABASE_SCHEMA_VERSION, initialize};
+    use rusqlite::Connection;
+    use std::time::Duration;
+
+    /// A read-only consumer (`jikji find`) must be able to initialize against an already-initialized
+    /// database while another connection holds the write lock (a long `jikji prepare`). An
+    /// unconditional schema_version upsert would block it for the whole busy timeout.
+    #[test]
+    fn initialize_does_not_need_the_write_lock_when_schema_is_current() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("jikji-init-lock-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("data dir");
+        let path = dir.join("index.sqlite");
+
+        let writer = Connection::open(&path).expect("writer");
+        writer.pragma_update(None, "journal_mode", "WAL").expect("wal");
+        initialize(&writer, &path).expect("first initialize creates the schema");
+        writer.execute_batch("BEGIN IMMEDIATE").expect("hold the write lock");
+
+        let reader = Connection::open(&path).expect("reader");
+        reader.busy_timeout(Duration::ZERO).expect("no busy wait");
+        initialize(&reader, &path).expect("initialize must not require the write lock");
+
+        writer.execute_batch("ROLLBACK").expect("release");
+        let stored: String = reader
+            .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+            .expect("schema_version");
+        assert_eq!(stored, DATABASE_SCHEMA_VERSION.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn initialize_repairs_a_stale_schema_version() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("jikji-init-stale-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("data dir");
+        let path = dir.join("index.sqlite");
+        let connection = Connection::open(&path).expect("open");
+        initialize(&connection, &path).expect("create schema");
+        connection
+            .execute("UPDATE metadata SET value='0' WHERE key='schema_version'", [])
+            .expect("make stale");
+        initialize(&connection, &path).expect("re-initialize");
+        let stored: String = connection
+            .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+            .expect("schema_version");
+        assert_eq!(stored, DATABASE_SCHEMA_VERSION.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
