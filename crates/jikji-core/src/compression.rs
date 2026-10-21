@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind, Read};
 
-use crate::{io_error, Result};
+use crate::{Result, io_error};
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 
@@ -9,7 +9,10 @@ pub fn compress_body_text(text: &str) -> Result<Vec<u8>> {
     if length > MAX_BODY_BYTES {
         return Err(io_error(
             "artifact body",
-            Error::new(ErrorKind::InvalidInput, "artifact body exceeds compression cap"),
+            Error::new(
+                ErrorKind::InvalidInput,
+                "artifact body exceeds compression cap",
+            ),
         ));
     }
     zstd::bulk::compress(text.as_bytes(), 3).map_err(|source| io_error("artifact body", source))
@@ -19,7 +22,10 @@ pub fn decompress_body_text(compressed: &[u8], original_size: usize) -> Result<S
     if original_size > MAX_BODY_BYTES {
         return Err(io_error(
             "artifact body",
-            Error::new(ErrorKind::InvalidData, "artifact body exceeds decompression cap"),
+            Error::new(
+                ErrorKind::InvalidData,
+                "artifact body exceeds decompression cap",
+            ),
         ));
     }
     let mut decoder = zstd::stream::read::Decoder::new(compressed)
@@ -36,12 +42,8 @@ pub fn decompress_body_text(compressed: &[u8], original_size: usize) -> Result<S
             Error::new(ErrorKind::InvalidData, "artifact body length mismatch"),
         ));
     }
-    String::from_utf8(bytes).map_err(|source| {
-        io_error(
-            "artifact body",
-            Error::new(ErrorKind::InvalidData, source),
-        )
-    })
+    String::from_utf8(bytes)
+        .map_err(|source| io_error("artifact body", Error::new(ErrorKind::InvalidData, source)))
 }
 
 #[cfg(test)]
@@ -52,7 +54,10 @@ mod tests {
     fn unicode_and_empty_round_trip() {
         for input in ["", "안녕하세요 🌍\n\0"] {
             let compressed = compress_body_text(input).unwrap();
-            assert_eq!(decompress_body_text(&compressed, input.len()).unwrap(), input);
+            assert_eq!(
+                decompress_body_text(&compressed, input.len()).unwrap(),
+                input
+            );
         }
     }
 

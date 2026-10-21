@@ -48,16 +48,24 @@ pub(crate) fn initialize(connection: &rusqlite::Connection, path: &Path) -> Resu
          CREATE INDEX IF NOT EXISTS search_field_lengths_lookup ON search_field_lengths(root_id, doc_id, field);"
     ).map_err(|source| sqlite_error(path, source))?;
     let mut columns = BTreeSet::new();
-    let mut statement = connection.prepare("PRAGMA table_info(search_docs)").map_err(|source| sqlite_error(path, source))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1)).map_err(|source| sqlite_error(path, source))?;
+    let mut statement = connection
+        .prepare("PRAGMA table_info(search_docs)")
+        .map_err(|source| sqlite_error(path, source))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|source| sqlite_error(path, source))?;
     for row in rows {
         columns.insert(row.map_err(|source| sqlite_error(path, source))?);
     }
     if !columns.contains("body_blob") {
-        connection.execute("ALTER TABLE search_docs ADD COLUMN body_blob BLOB", []).map_err(|source| sqlite_error(path, source))?;
+        connection
+            .execute("ALTER TABLE search_docs ADD COLUMN body_blob BLOB", [])
+            .map_err(|source| sqlite_error(path, source))?;
     }
     if !columns.contains("body_size") {
-        connection.execute("ALTER TABLE search_docs ADD COLUMN body_size INTEGER", []).map_err(|source| sqlite_error(path, source))?;
+        connection
+            .execute("ALTER TABLE search_docs ADD COLUMN body_size INTEGER", [])
+            .map_err(|source| sqlite_error(path, source))?;
     }
     Ok(())
 }

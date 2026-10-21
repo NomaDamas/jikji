@@ -70,12 +70,16 @@ pub fn database_path() -> Result<PathBuf> {
 /// Returns `(bytes_before, bytes_after)`; this never touches source roots.
 pub fn vacuum_database() -> Result<(u64, u64)> {
     let path = database_path()?;
-    let before = fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+    let before = fs::metadata(&path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     let connection = open_database()?;
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
         .map_err(|source| sqlite_error(&path, source))?;
-    let after = fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+    let after = fs::metadata(&path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     Ok((before, after))
 }
 
@@ -203,7 +207,6 @@ pub fn ensure_prepare_root_allowed(root: &Path) -> Result<()> {
     }
     Ok(())
 }
-
 
 fn unresolved_root_keys(root: &Path) -> Vec<String> {
     let mut keys = Vec::new();
@@ -427,10 +430,18 @@ pub fn replace_artifacts(root: &Path, artifacts: &[(&str, Value)]) -> Result<()>
 
 /// Replace all prepare-owned row kinds, including empty collections, in one transaction.
 pub fn replace_prepared_artifacts(root: &Path, artifacts: &[(&str, Value)]) -> Result<()> {
-    replace_artifact_rows(root, artifacts, &["files", "folders", "documents", "chunks", "cards"])
+    replace_artifact_rows(
+        root,
+        artifacts,
+        &["files", "folders", "documents", "chunks", "cards"],
+    )
 }
 
-fn replace_artifact_rows(root: &Path, artifacts: &[(&str, Value)], empty_kinds: &[&str]) -> Result<()> {
+fn replace_artifact_rows(
+    root: &Path,
+    artifacts: &[(&str, Value)],
+    empty_kinds: &[&str],
+) -> Result<()> {
     let mut connection = open_database()?;
     let tx = connection.transaction().map_err(sqlite_error_path)?;
     let root_id = ensure_root_tx(&tx, root)?;
@@ -439,8 +450,11 @@ fn replace_artifact_rows(root: &Path, artifacts: &[(&str, Value)], empty_kinds: 
     kinds.sort_unstable();
     kinds.dedup();
     for kind in kinds {
-        tx.execute("DELETE FROM artifacts WHERE root_id=?1 AND kind=?2", params![root_id, kind])
-            .map_err(sqlite_error_path)?;
+        tx.execute(
+            "DELETE FROM artifacts WHERE root_id=?1 AND kind=?2",
+            params![root_id, kind],
+        )
+        .map_err(sqlite_error_path)?;
     }
     for (kind, value) in artifacts {
         let (stored, bodies) = split_bodies(kind, value)?;
@@ -449,7 +463,8 @@ fn replace_artifact_rows(root: &Path, artifacts: &[(&str, Value)], empty_kinds: 
         tx.execute(
             "INSERT INTO artifacts(root_id, kind, row_json) VALUES(?1, ?2, ?3)",
             params![root_id, kind, raw],
-        ).map_err(sqlite_error_path)?;
+        )
+        .map_err(sqlite_error_path)?;
         let ordinal = tx.last_insert_rowid();
         for (field, text) in bodies {
             let compressed = compression::compress_body_text(&text)?;
@@ -466,11 +481,16 @@ fn split_bodies(kind: &str, value: &Value) -> Result<(Value, Vec<(String, String
     if kind != "chunks" {
         return Ok((value.clone(), Vec::new()));
     }
-    let Some(object) = value.as_object() else { return Ok((value.clone(), Vec::new())); };
+    let Some(object) = value.as_object() else {
+        return Ok((value.clone(), Vec::new()));
+    };
     let mut stored = object.clone();
     let mut bodies = Vec::new();
     for field in BODY_FIELDS {
-        if let Some(text) = stored.remove(field).and_then(|v| v.as_str().map(str::to_owned)) {
+        if let Some(text) = stored
+            .remove(field)
+            .and_then(|v| v.as_str().map(str::to_owned))
+        {
             bodies.push((field.to_owned(), text));
         }
     }
@@ -478,9 +498,14 @@ fn split_bodies(kind: &str, value: &Value) -> Result<(Value, Vec<(String, String
 }
 
 fn restore_bodies(mut value: Value, bodies: Vec<(String, Vec<u8>, usize)>) -> Result<Value> {
-    let Some(object) = value.as_object_mut() else { return Ok(value); };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(value);
+    };
     for (field, compressed, length) in bodies {
-        object.insert(field, Value::String(compression::decompress_body_text(&compressed, length)?));
+        object.insert(
+            field,
+            Value::String(compression::decompress_body_text(&compressed, length)?),
+        );
     }
     Ok(value)
 }
@@ -488,20 +513,54 @@ fn restore_bodies(mut value: Value, bodies: Vec<(String, Vec<u8>, usize)>) -> Re
 pub fn load_artifacts(root: &Path, kind: &str) -> Result<Vec<Value>> {
     migrate_legacy(root)?;
     let connection = open_database()?;
-    let Some(root_id) = root_id(&connection, root)? else { return Ok(Vec::new()); };
-    let mut statement = connection.prepare("SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal").map_err(sqlite_error_path)?;
-    let rows = statement.query_map(params![root_id, kind], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))).map_err(sqlite_error_path)?;
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(Vec::new());
+    };
+    let mut statement = connection
+        .prepare(
+            "SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal",
+        )
+        .map_err(sqlite_error_path)?;
+    let rows = statement
+        .query_map(params![root_id, kind], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_error_path)?;
     rows.map(|row| {
         let (ordinal, raw) = row.map_err(sqlite_error_path)?;
         restore_row(&connection, ordinal, &raw)
-    }).collect()
+    })
+    .collect()
 }
 
 fn restore_row(connection: &Connection, ordinal: i64, raw: &str) -> Result<Value> {
-    let value = serde_json::from_str(raw).map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
+    let value = serde_json::from_str(raw)
+        .map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
     let mut statement = connection.prepare("SELECT field_name, body_zstd, original_len FROM artifact_bodies WHERE artifact_ordinal=?1").map_err(sqlite_error_path)?;
-    let rows = statement.query_map([ordinal], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?, row.get::<_, i64>(2)?))).map_err(sqlite_error_path)?;
-    let bodies = rows.map(|row| { let (field, bytes, length) = row.map_err(sqlite_error_path)?; Ok((field, bytes, usize::try_from(length).map_err(|_| io_error("artifact body", Error::new(ErrorKind::InvalidData, "negative body length")))?)) }).collect::<Result<Vec<_>>>()?;
+    let rows = statement
+        .query_map([ordinal], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(sqlite_error_path)?;
+    let bodies = rows
+        .map(|row| {
+            let (field, bytes, length) = row.map_err(sqlite_error_path)?;
+            Ok((
+                field,
+                bytes,
+                usize::try_from(length).map_err(|_| {
+                    io_error(
+                        "artifact body",
+                        Error::new(ErrorKind::InvalidData, "negative body length"),
+                    )
+                })?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
     restore_bodies(value, bodies)
 }
 
@@ -511,7 +570,9 @@ pub fn load_artifact(root: &Path, kind: &str) -> Result<Option<Value>> {
 
 pub fn load_artifact_by_path(root: &Path, kind: &str, path: &str) -> Result<Option<Value>> {
     let values = load_artifacts(root, kind)?;
-    Ok(values.into_iter().find(|value| value.get("path").and_then(Value::as_str) == Some(path)))
+    Ok(values
+        .into_iter()
+        .find(|value| value.get("path").and_then(Value::as_str) == Some(path)))
 }
 
 pub fn load_artifact_paths(root: &Path, kind: &str) -> Result<HashSet<String>> {
@@ -546,14 +607,20 @@ pub fn load_artifacts_matching_terms(
     if terms.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
-    let lowered = terms.iter().map(|term| term.to_lowercase()).collect::<Vec<_>>();
+    let lowered = terms
+        .iter()
+        .map(|term| term.to_lowercase())
+        .collect::<Vec<_>>();
     let mut matches = Vec::new();
     for value in load_artifacts(root, kind)? {
-        let raw = serde_json::to_string(&value).map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
+        let raw = serde_json::to_string(&value)
+            .map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
         let folded = raw.to_lowercase();
         if lowered.iter().any(|term| folded.contains(term)) {
             matches.push(value);
-            if matches.len() >= limit { break; }
+            if matches.len() >= limit {
+                break;
+            }
         }
     }
     Ok(matches)
@@ -791,10 +858,14 @@ fn statistics_for_id(connection: &Connection, root_id: i64) -> Result<RootStatis
 
 fn load_artifacts_by_id(connection: &Connection, root_id: i64, kind: &str) -> Result<Vec<Value>> {
     let mut statement = connection
-        .prepare("SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal")
+        .prepare(
+            "SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal",
+        )
         .map_err(sqlite_error_path)?;
     let rows = statement
-        .query_map(params![root_id, kind], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .query_map(params![root_id, kind], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(sqlite_error_path)?;
     rows.map(|row| {
         let (ordinal, raw) = row.map_err(sqlite_error_path)?;
@@ -823,7 +894,11 @@ fn initialize(connection: &Connection, path: &Path) -> Result<()> {
     // Write only when the stored version differs: an unconditional upsert makes every read-only
     // consumer (`jikji find`) take SQLite's single write lock and queue behind a running `prepare`.
     let stored: Option<String> = connection
-        .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+        .query_row(
+            "SELECT value FROM metadata WHERE key='schema_version'",
+            [],
+            |row| row.get(0),
+        )
         .optional()
         .map_err(|source| sqlite_error(path, source))?;
     if stored.as_deref() != Some(DATABASE_SCHEMA_VERSION.to_string().as_str()) {
@@ -838,7 +913,13 @@ fn initialize(connection: &Connection, path: &Path) -> Result<()> {
 }
 
 fn empty_statistics() -> RootStatistics {
-    RootStatistics { files: 0, folders: 0, documents: 0, chunks: 0, parse_errors: 0 }
+    RootStatistics {
+        files: 0,
+        folders: 0,
+        documents: 0,
+        chunks: 0,
+        parse_errors: 0,
+    }
 }
 
 fn remove_root_cache(root_id: i64) -> Result<()> {
@@ -940,14 +1021,19 @@ mod initialize_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("jikji-init-lock-{}-{nonce}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("jikji-init-lock-{}-{nonce}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("data dir");
         let path = dir.join("index.sqlite");
 
         let writer = Connection::open(&path).expect("writer");
-        writer.pragma_update(None, "journal_mode", "WAL").expect("wal");
+        writer
+            .pragma_update(None, "journal_mode", "WAL")
+            .expect("wal");
         initialize(&writer, &path).expect("first initialize creates the schema");
-        writer.execute_batch("BEGIN IMMEDIATE").expect("hold the write lock");
+        writer
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold the write lock");
 
         let reader = Connection::open(&path).expect("reader");
         reader.busy_timeout(Duration::ZERO).expect("no busy wait");
@@ -955,7 +1041,11 @@ mod initialize_tests {
 
         writer.execute_batch("ROLLBACK").expect("release");
         let stored: String = reader
-            .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+            .query_row(
+                "SELECT value FROM metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
             .expect("schema_version");
         assert_eq!(stored, DATABASE_SCHEMA_VERSION.to_string());
         let _ = std::fs::remove_dir_all(&dir);
@@ -967,17 +1057,25 @@ mod initialize_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time")
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("jikji-init-stale-{}-{nonce}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("jikji-init-stale-{}-{nonce}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("data dir");
         let path = dir.join("index.sqlite");
         let connection = Connection::open(&path).expect("open");
         initialize(&connection, &path).expect("create schema");
         connection
-            .execute("UPDATE metadata SET value='0' WHERE key='schema_version'", [])
+            .execute(
+                "UPDATE metadata SET value='0' WHERE key='schema_version'",
+                [],
+            )
             .expect("make stale");
         initialize(&connection, &path).expect("re-initialize");
         let stored: String = connection
-            .query_row("SELECT value FROM metadata WHERE key='schema_version'", [], |row| row.get(0))
+            .query_row(
+                "SELECT value FROM metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
             .expect("schema_version");
         assert_eq!(stored, DATABASE_SCHEMA_VERSION.to_string());
         let _ = std::fs::remove_dir_all(&dir);

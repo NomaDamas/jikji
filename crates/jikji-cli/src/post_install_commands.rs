@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use jikji_core::{JikjiError, PrepareOptions};
 use jikji_index::prepare;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::args::PostInstallPrepareArgs;
 use crate::output::print_json;
