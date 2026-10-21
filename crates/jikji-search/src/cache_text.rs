@@ -7,10 +7,12 @@ pub(crate) fn generated_cache_path(storage_dir: &Path, cache_path: &str) -> Opti
     }
     let rel = cache_path.strip_prefix(".jikji/").unwrap_or(cache_path);
     let rel_path = Path::new(rel);
-    if rel_path.is_absolute()
-        || rel_path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir))
+    // `is_absolute()` is not enough on Windows: `/etc/passwd` and `\etc\passwd` have a root but no
+    // drive, and `C:foo` has a drive but no root. `join` would resolve all of them outside
+    // `storage_dir`, so accept only plain relative components.
+    if rel_path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
     {
         return None;
     }
@@ -145,6 +147,9 @@ mod tests {
         let storage = Path::new("/tmp/jikji/roots/601");
         assert!(generated_cache_path(storage, "").is_none());
         assert!(generated_cache_path(storage, "/etc/passwd").is_none());
+        // On Unix a backslash is an ordinary filename character; on Windows it roots the path.
+        #[cfg(windows)]
+        assert!(generated_cache_path(storage, "\\etc\\passwd").is_none());
         assert!(generated_cache_path(storage, ".jikji/doc_text/../secret.txt").is_none());
         assert!(generated_cache_path(storage, "doc_text/../../etc/passwd").is_none());
     }
