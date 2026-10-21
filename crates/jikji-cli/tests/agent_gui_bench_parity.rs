@@ -171,7 +171,17 @@ fn task6_gui_open_and_reveal_protect_paths_and_token() {
         gui.manage_token()
     ));
     assert!(reveal.starts_with("HTTP/1.1 200 OK"), "{reveal}");
-    assert!(reveal.contains(root.to_string_lossy().as_ref()), "{reveal}");
+    // Compare parsed, canonical paths: the JSON body escapes backslashes and Windows canonical
+    // paths carry a `\\?\` prefix, so a substring match on the raw path only works on Unix.
+    let revealed = response_json(&reveal);
+    let revealed = revealed["path"].as_str().expect("revealed path");
+    assert_eq!(
+        Path::new(revealed)
+            .canonicalize()
+            .expect("revealed path exists"),
+        root.canonicalize().expect("root exists"),
+        "{reveal}"
+    );
 }
 
 #[test]
