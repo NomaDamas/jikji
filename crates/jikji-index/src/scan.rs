@@ -128,14 +128,43 @@ impl ScanState {
                 continue;
             }
             if file_type.is_file() {
-                if is_pure_generated_agent_rule(&path, &name)? { continue; }
-                let size = match entry.metadata() { Ok(meta) => meta.len(), Err(_) => continue };
-                if self.options.max_file_bytes.is_some_and(|limit| size > limit) { continue; }
-                if !self.options.extensions.is_empty() {
-                    let ext = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase();
-                    if !self.options.extensions.iter().any(|allowed| allowed.trim_start_matches('.').eq_ignore_ascii_case(&ext)) { continue; }
+                if is_pure_generated_agent_rule(&path, &name)? {
+                    continue;
                 }
-                if self.options.max_files.is_some_and(|limit| self.files.len() >= limit) { self.truncated = true; return Ok(()); }
+                let size = match entry.metadata() {
+                    Ok(meta) => meta.len(),
+                    Err(_) => continue,
+                };
+                if self
+                    .options
+                    .max_file_bytes
+                    .is_some_and(|limit| size > limit)
+                {
+                    continue;
+                }
+                if !self.options.extensions.is_empty() {
+                    let ext = path
+                        .extension()
+                        .and_then(|v| v.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if !self
+                        .options
+                        .extensions
+                        .iter()
+                        .any(|allowed| allowed.trim_start_matches('.').eq_ignore_ascii_case(&ext))
+                    {
+                        continue;
+                    }
+                }
+                if self
+                    .options
+                    .max_files
+                    .is_some_and(|limit| self.files.len() >= limit)
+                {
+                    self.truncated = true;
+                    return Ok(());
+                }
                 self.files.push(path);
             }
         }
@@ -273,7 +302,7 @@ mod tests {
         let rels: Vec<String> = scan
             .files
             .iter()
-            .map(|path| super::rel_path(dir.path(), path))
+            .map(|path| super::rel_path(&scan.root, path))
             .collect();
         assert_eq!(rels, vec!["brief.pdf".to_string()]);
     }
@@ -309,7 +338,7 @@ mod tests {
         let rels: Vec<String> = scan
             .files
             .iter()
-            .map(|path| super::rel_path(dir.path(), path))
+            .map(|path| super::rel_path(&scan.root, path))
             .collect();
         assert_eq!(rels, vec!["keep/hello.txt".to_string()]);
         assert!(

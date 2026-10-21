@@ -271,7 +271,8 @@ fn media_bridge_meta(outcome: &MediaBridgeOutcome) -> Value {
     })
 }
 
-#[cfg(test)]
+// The only test needs a POSIX FIFO, so the whole module (and its imports) is unix-only.
+#[cfg(all(test, unix))]
 mod tests {
     use super::{CacheDirs, document_rows};
     use crate::scan::scan_root;
@@ -279,7 +280,6 @@ mod tests {
     use std::fs;
     use std::time::{Duration, Instant};
 
-    #[cfg(unix)]
     #[test]
     fn document_hash_timeout_skips_blocked_file_and_keeps_others() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -292,7 +292,9 @@ mod tests {
         assert!(status.success(), "mkfifo {fifo:?}");
 
         let mut scan = scan_root(dir.path(), &PrepareOptions::default()).expect("scan");
-        scan.files.push(fifo);
+        // `scan.root` is canonical (macOS /var -> /private/var); keep the FIFO under it so its
+        // relative path resolves.
+        scan.files.push(scan.root.join("stuck.pdf"));
 
         let cache = dir.path().join("cache");
         let text = cache.join("doc_text");

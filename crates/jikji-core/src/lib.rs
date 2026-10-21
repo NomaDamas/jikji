@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub mod storage;
 pub mod compression;
+pub mod storage;
 
 pub const ROOT_AGENT_MAP: &str = ".jikji_agent_map.md";
 pub const LEGACY_ROOT_AGENT_MAP: &str = "000_JIKJI_AGENT_MAP.md";

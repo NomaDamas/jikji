@@ -6,7 +6,10 @@ use clap::Parser;
 pub(crate) struct PrepareArgs {
     #[arg(default_value = ".")]
     pub(crate) root: PathBuf,
-    #[arg(long, help = "Clear Jikji-owned generated artifacts before rebuilding; source files are preserved")]
+    #[arg(
+        long,
+        help = "Clear Jikji-owned generated artifacts before rebuilding; source files are preserved"
+    )]
     pub(crate) clean_reindex: bool,
     #[arg(long)]
     pub(crate) json: bool,

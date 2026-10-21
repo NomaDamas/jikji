@@ -46,7 +46,10 @@ pub(crate) enum Command {
         #[arg(long)]
         json: bool,
     },
-    #[command(about = "Query an existing Jikji index for bounded local discovery when the target path or corpus content is unknown.", long_about = "Query an existing Jikji index for local file, folder, metadata, or document-content discovery only when the target path is unknown and an explicit or inferred bounded root exists. Not for general QA, explanations, coding advice, web search, known-path reads or edits, stats, process/git/build/test/package commands, directory listings, or LSP symbol lookup.")]
+    #[command(
+        about = "Query an existing Jikji index for bounded local discovery when the target path or corpus content is unknown.",
+        long_about = "Query an existing Jikji index for local file, folder, metadata, or document-content discovery only when the target path is unknown and an explicit or inferred bounded root exists. Not for general QA, explanations, coding advice, web search, known-path reads or edits, stats, process/git/build/test/package commands, directory listings, or LSP symbol lookup."
+    )]
     Find(FindArgs),
     #[command(about = "Rank files from an existing Jikji index.")]
     Search(SearchArgs),
