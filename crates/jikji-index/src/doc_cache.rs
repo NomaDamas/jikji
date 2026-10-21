@@ -292,7 +292,9 @@ mod tests {
         assert!(status.success(), "mkfifo {fifo:?}");
 
         let mut scan = scan_root(dir.path(), &PrepareOptions::default()).expect("scan");
-        scan.files.push(fifo);
+        // `scan.root` is canonical (macOS /var -> /private/var); keep the FIFO under it so its
+        // relative path resolves.
+        scan.files.push(scan.root.join("stuck.pdf"));
 
         let cache = dir.path().join("cache");
         let text = cache.join("doc_text");

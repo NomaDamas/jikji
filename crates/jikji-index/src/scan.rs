@@ -302,7 +302,7 @@ mod tests {
         let rels: Vec<String> = scan
             .files
             .iter()
-            .map(|path| super::rel_path(dir.path(), path))
+            .map(|path| super::rel_path(&scan.root, path))
             .collect();
         assert_eq!(rels, vec!["brief.pdf".to_string()]);
     }
@@ -338,7 +338,7 @@ mod tests {
         let rels: Vec<String> = scan
             .files
             .iter()
-            .map(|path| super::rel_path(dir.path(), path))
+            .map(|path| super::rel_path(&scan.root, path))
             .collect();
         assert_eq!(rels, vec!["keep/hello.txt".to_string()]);
         assert!(

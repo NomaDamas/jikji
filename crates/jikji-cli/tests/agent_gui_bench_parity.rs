@@ -366,8 +366,10 @@ fn gui_find_includes_hits_from_indexed_library_roots() {
     use std::process::Command;
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let data_dir = temp.path().join("data");
-    let home = temp.path().join("home");
+    // Paths are registered canonically (macOS /var -> /private/var); build expectations from that form.
+    let temp_path = temp.path().canonicalize().expect("canonical tempdir");
+    let data_dir = temp_path.join("data");
+    let home = temp_path.join("home");
     let active = home.join("projects/app");
     let documents = home.join("Documents");
     fs::create_dir_all(&active).expect("active");
@@ -423,8 +425,10 @@ fn gui_find_keeps_nested_drive_root_when_parent_is_indexed() {
     use std::process::Command;
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let data_dir = temp.path().join("data");
-    let home = temp.path().join("home");
+    // Paths are registered canonically (macOS /var -> /private/var); build expectations from that form.
+    let temp_path = temp.path().canonicalize().expect("canonical tempdir");
+    let data_dir = temp_path.join("data");
+    let home = temp_path.join("home");
     let active = home.join("projects/app");
     let drive = home.join("GoogleDrive");
     let nested = drive.join("마커");
