@@ -268,8 +268,10 @@ fn clean_reindex_rebuilds_without_tombstones_or_source_deletion() {
     let (_lock, _data) = isolate_data_dir();
     let source = temp.path().join("keep.txt");
     fs::write(&source, "stable source").unwrap();
-    let mut options = PrepareOptions::default();
-    options.clean_reindex = true;
+    let options = PrepareOptions {
+        clean_reindex: true,
+        ..Default::default()
+    };
     prepare(temp.path(), &options).unwrap();
     fs::write(temp.path().join("transient.txt"), "transient").unwrap();
     prepare(temp.path(), &options).unwrap();

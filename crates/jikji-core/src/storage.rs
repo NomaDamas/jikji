@@ -876,7 +876,7 @@ fn load_artifacts_by_id(connection: &Connection, root_id: i64, kind: &str) -> Re
 
 fn initialize(connection: &Connection, path: &Path) -> Result<()> {
     connection
-        .execute_batch(&format!(r#"
+        .execute_batch(r#"
         CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS roots(id INTEGER PRIMARY KEY, canonical_root TEXT NOT NULL UNIQUE, updated_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS artifacts(root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE, ordinal INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, row_json TEXT NOT NULL);
@@ -889,7 +889,7 @@ fn initialize(connection: &Connection, path: &Path) -> Result<()> {
             original_len INTEGER NOT NULL CHECK(original_len >= 0),
             PRIMARY KEY(artifact_ordinal, field_name)
         );
-    "#))
+    "#)
     .map_err(|source| sqlite_error(path, source))?;
     // Write only when the stored version differs: an unconditional upsert makes every read-only
     // consumer (`jikji find`) take SQLite's single write lock and queue behind a running `prepare`.
