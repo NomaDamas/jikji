@@ -220,6 +220,16 @@ fn unresolved_root_keys(root: &Path) -> Vec<String> {
             push_unresolved_key(&mut keys, &absolute);
         }
     }
+    // Roots are registered under their canonical path, so a path that only differs by a symlinked
+    // parent (macOS `/var` -> `/private/var`) must resolve to it as well. Cloud-drive paths are
+    // never canonicalized: that can block on a network mount.
+    if !keys
+        .iter()
+        .any(|key| cloud_drive_path_blocked(Path::new(key)))
+        && let Ok(canonical) = root.canonicalize()
+    {
+        push_unresolved_key(&mut keys, &canonical);
+    }
     keys
 }
 
@@ -963,7 +973,9 @@ fn sqlite_error_path(source: rusqlite::Error) -> crate::JikjiError {
 
 #[cfg(test)]
 mod cloud_drive_tests {
-    use super::{cloud_drive_path_blocked, path_looks_like_cloud_drive};
+    #[cfg(unix)]
+    use super::cloud_drive_path_blocked;
+    use super::path_looks_like_cloud_drive;
     use std::path::Path;
 
     #[test]
