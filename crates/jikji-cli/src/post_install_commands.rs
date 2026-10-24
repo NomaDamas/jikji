@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use jikji_core::{JikjiError, PrepareOptions};
 use jikji_index::prepare;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::args::PostInstallPrepareArgs;
 use crate::output::print_json;
@@ -398,7 +398,8 @@ mod tests {
             .lock()
             .expect("document-heavy test lock");
         let temp = tempfile::tempdir().expect("tempdir");
-        let home = temp.path();
+        // Roots are canonicalized (macOS /var -> /private/var), so compare against the same form.
+        let home = &temp.path().canonicalize().expect("canonical home");
         fs::create_dir(home.join("Documents")).expect("documents");
         fs::create_dir(home.join("GoogleDrive")).expect("google drive");
         fs::write(home.join("Documents").join("brief.pdf"), "%PDF").expect("pdf");
@@ -422,7 +423,8 @@ mod tests {
             .lock()
             .expect("document-heavy test lock");
         let temp = tempfile::tempdir().expect("tempdir");
-        let home = temp.path();
+        // Roots are canonicalized (macOS /var -> /private/var), so compare against the same form.
+        let home = &temp.path().canonicalize().expect("canonical home");
         fs::create_dir(home.join("Documents")).expect("documents");
         fs::create_dir(home.join("GoogleDrive")).expect("google drive");
         fs::create_dir(home.join("GoogleDrive").join("마커")).expect("marker");
@@ -469,7 +471,8 @@ mod tests {
             .expect("document-heavy test lock");
 
         let temp = tempfile::tempdir().expect("tempdir");
-        let home = temp.path();
+        // Roots are canonicalized (macOS /var -> /private/var), so compare against the same form.
+        let home = &temp.path().canonicalize().expect("canonical home");
         fs::create_dir(home.join("Documents")).expect("documents");
         fs::write(home.join("Documents").join("brief.pdf"), "%PDF").expect("pdf");
         let drive = home.join("GoogleDrive");
@@ -520,7 +523,8 @@ mod tests {
     #[test]
     fn select_default_roots_does_not_index_home_as_a_root() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let home = temp.path();
+        // Roots are canonicalized (macOS /var -> /private/var), so compare against the same form.
+        let home = &temp.path().canonicalize().expect("canonical home");
         for name in ["a.pdf", "b.pdf", "c.pdf"] {
             fs::write(home.join(name), "%PDF").expect("home pdf");
         }

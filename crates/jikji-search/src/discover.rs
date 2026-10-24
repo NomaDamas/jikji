@@ -13,9 +13,9 @@ use crate::discover_contract::{
 use crate::discover_query::{
     anchor_tokens, classify_query, retry_proof_for, strategy_variants, strip_shell_noise,
 };
-use crate::searcher::{search, SearchCandidate, SearchOptions};
+use crate::searcher::{SearchCandidate, SearchOptions, search};
 use jikji_core::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoverOptions {
@@ -418,7 +418,10 @@ fn generated_search_path_weight(path: &str) -> f64 {
 }
 
 fn archive_search_path_weight(query: &str, path: &str) -> f64 {
-    if query_has_hint(&query.to_lowercase(), &["zip", "tar", "tgz", "7z", "rar", "archive", "압축"]) {
+    if query_has_hint(
+        &query.to_lowercase(),
+        &["zip", "tar", "tgz", "7z", "rar", "archive", "압축"],
+    ) {
         return 1.0;
     }
     let lower = path.to_lowercase();

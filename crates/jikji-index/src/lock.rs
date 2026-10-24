@@ -95,6 +95,7 @@ fn process_looks_like_live_jikji(pid: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::LockGuard;
+    #[cfg(target_os = "linux")]
     use jikji_core::JikjiError;
     use serde_json::json;
     use std::fs;
@@ -127,6 +128,8 @@ mod tests {
         .expect("write lock");
     }
 
+    // Liveness is only detectable through /proc, so a live holder is only recognised on Linux.
+    #[cfg(target_os = "linux")]
     #[test]
     fn acquire_does_not_steal_lock_held_by_live_jikji_process() {
         let dir = temp_index("live");

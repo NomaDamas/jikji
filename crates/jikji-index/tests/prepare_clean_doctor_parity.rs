@@ -1,10 +1,10 @@
 use std::fs;
 use std::sync::{Mutex, MutexGuard};
 
-use jikji_core::storage::{clear_artifact, load_artifacts, open_database, register_root};
 use jikji_core::PrepareOptions;
-use jikji_index::{clean, doctor, prepare, reindex_search, CleanOptions};
-use jikji_search::{search_index_status, IndexStatus};
+use jikji_core::storage::{clear_artifact, load_artifacts, open_database, register_root};
+use jikji_index::{CleanOptions, clean, doctor, prepare, reindex_search};
+use jikji_search::{IndexStatus, search_index_status};
 
 static DATA_DIR_LOCK: Mutex<()> = Mutex::new(());
 
@@ -268,13 +268,23 @@ fn clean_reindex_rebuilds_without_tombstones_or_source_deletion() {
     let (_lock, _data) = isolate_data_dir();
     let source = temp.path().join("keep.txt");
     fs::write(&source, "stable source").unwrap();
-    let mut options = PrepareOptions::default();
-    options.clean_reindex = true;
+    let options = PrepareOptions {
+        clean_reindex: true,
+        ..Default::default()
+    };
     prepare(temp.path(), &options).unwrap();
     fs::write(temp.path().join("transient.txt"), "transient").unwrap();
     prepare(temp.path(), &options).unwrap();
     let rows = load_artifacts(temp.path(), "files").unwrap();
-    assert_eq!(rows.iter().filter(|row| row["path"] == "keep.txt").count(), 1);
-    assert_eq!(rows.iter().filter(|row| row["path"] == "transient.txt").count(), 1);
+    assert_eq!(
+        rows.iter().filter(|row| row["path"] == "keep.txt").count(),
+        1
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row["path"] == "transient.txt")
+            .count(),
+        1
+    );
     assert_eq!(fs::read_to_string(source).unwrap(), "stable source");
 }

@@ -1,11 +1,15 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use jikji_media_bridge::{
-    BridgeAvailability, BridgeConfig, BridgeRuntime, MediaBridgeRequest, MediaBridgeStatus,
-    MediaKind, NativeEngineConfig,
+    BridgeAvailability, BridgeRuntime, MediaBridgeRequest, MediaBridgeStatus, MediaKind,
 };
+#[cfg(unix)]
+use jikji_media_bridge::{BridgeConfig, NativeEngineConfig};
 use tempfile::tempdir;
 
 #[test]
@@ -69,7 +73,11 @@ fn missing_media_is_unavailable_without_panic() {
     ));
 
     assert_eq!(outcome.status, MediaBridgeStatus::Unavailable);
-    assert!(outcome.error.contains("No such file") || outcome.error.contains("not found"));
+    // The OS wording differs: "No such file" (Unix), "cannot find the file specified" (Windows).
+    assert!(
+        !outcome.error.is_empty(),
+        "missing media must explain itself"
+    );
 }
 
 #[test]
@@ -88,6 +96,8 @@ fn malformed_media_remains_metadata_only() {
     assert!(!outcome.metadata.contains_key("width"));
 }
 
+// The fixture engine is a POSIX shell script.
+#[cfg(unix)]
 #[test]
 fn configured_ocr_and_asr_engines_return_text() {
     for (kind, expected) in [
@@ -111,6 +121,8 @@ fn configured_ocr_and_asr_engines_return_text() {
     }
 }
 
+// The fixture engine is a POSIX shell script.
+#[cfg(unix)]
 #[test]
 fn configured_ocr_and_asr_engine_errors_are_reported() {
     for kind in [MediaKind::Image, MediaKind::Audio] {
@@ -124,6 +136,8 @@ fn configured_ocr_and_asr_engine_errors_are_reported() {
     }
 }
 
+// The fixture engine is a POSIX shell script.
+#[cfg(unix)]
 #[test]
 fn configured_ocr_and_asr_engine_timeouts_are_bounded() {
     for kind in [MediaKind::Image, MediaKind::Audio] {
@@ -139,11 +153,13 @@ fn configured_ocr_and_asr_engine_timeouts_are_bounded() {
     }
 }
 
+#[cfg(unix)]
 struct MediaFixture {
     _dir: tempfile::TempDir,
     path: PathBuf,
 }
 
+#[cfg(unix)]
 fn media_fixture(kind: MediaKind) -> MediaFixture {
     let dir = tempdir().expect("tempdir");
     let path = match kind {
@@ -154,6 +170,7 @@ fn media_fixture(kind: MediaKind) -> MediaFixture {
     MediaFixture { _dir: dir, path }
 }
 
+#[cfg(unix)]
 fn runtime_with_engine(kind: MediaKind, mode: &str, timeout: Duration) -> BridgeRuntime {
     let script = match mode {
         "success" => "printf '%s native text\\n' \"$JIKJI_MEDIA_ENGINE_KIND\"",

@@ -197,7 +197,6 @@ mod tests {
         assert!(installed.contains("known-path reads or edits"));
         assert!(!installed.contains("Absolute Rule: Jikji Find First"));
         assert_eq!(installed, skill_markdown());
-
     }
 
     #[test]
@@ -251,9 +250,15 @@ mod tests {
         assert!(written.contains("JIKJI SCOPE GATE"));
         assert!(written.contains("local file/folder discovery intent"));
         assert!(written.contains("Negative: read"));
-        assert!(written.contains("Retry proof and stop restrictions apply only to the discovery substep"));
+        assert!(
+            written
+                .contains("Retry proof and stop restrictions apply only to the discovery substep")
+        );
         assert!(!written.contains("ABSOLUTE RULE — JIKJI FIRST"));
-        assert!(!written.contains("Do not begin with grep, rg, glob, find, fd, ls, tree, cat, skills_list"));
+        assert!(
+            !written
+                .contains("Do not begin with grep, rg, glob, find, fd, ls, tree, cat, skills_list")
+        );
 
         for required in [
             "only when ALL are true",
@@ -271,7 +276,10 @@ mod tests {
             "raw_fallback_after_retry",
             "not later reads, edits, or tests",
         ] {
-            assert!(written.contains(required), "missing routing policy: {required}");
+            assert!(
+                written.contains(required),
+                "missing routing policy: {required}"
+            );
         }
 
         let removed = remove_routing_block(&path).expect("remove");
@@ -291,7 +299,9 @@ mod tests {
         assert!(text.contains("Installation requires explicit user authorization"));
         assert!(text.contains("Never run a second Jikji retry"));
         assert!(text.contains("raw_fallback_allowed=false"));
-        assert!(text.contains("Retry proof and stop restrictions apply only to the discovery substep"));
+        assert!(
+            text.contains("Retry proof and stop restrictions apply only to the discovery substep")
+        );
         for required in [
             "require ALL",
             "local file/folder discovery intent",

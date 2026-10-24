@@ -632,9 +632,13 @@ mod tests {
         );
     }
 
+    /// Serves canned responses until dropped. It must outlive the whole test: a server that stops
+    /// itself after an idle period races with a slow client on a loaded machine and turns into
+    /// `Connection refused`.
     struct FixtureServer {
         base_url: String,
-        _thread: thread::JoinHandle<()>,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
     }
 
     impl FixtureServer {
@@ -642,22 +646,23 @@ mod tests {
             let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
             let address = listener.local_addr().expect("address");
             listener.set_nonblocking(true).expect("nonblocking");
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let stopped = std::sync::Arc::clone(&stop);
             let handle = thread::spawn(move || {
-                let idle_limit = std::time::Duration::from_millis(250);
-                let mut idle_since = std::time::Instant::now();
-                loop {
+                while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
-                            idle_since = std::time::Instant::now();
+                            // The accepted socket must block even though the listener does not.
+                            let _ = stream.set_nonblocking(false);
                             let path = request_path(&mut stream);
                             let bytes = handler(&path);
-                            stream.write_all(&bytes).expect("respond");
+                            let _ = stream.write_all(&bytes);
+                            let _ = stream.flush();
+                            // Let the client read the whole response before the socket closes.
+                            let _ = stream.shutdown(std::net::Shutdown::Write);
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            if idle_since.elapsed() >= idle_limit {
-                                break;
-                            }
-                            thread::sleep(std::time::Duration::from_millis(5));
+                            thread::sleep(std::time::Duration::from_millis(2));
                         }
                         Err(_) => break,
                     }
@@ -665,7 +670,17 @@ mod tests {
             });
             Self {
                 base_url: format!("http://{address}"),
-                _thread: handle,
+                stop,
+                thread: Some(handle),
+            }
+        }
+    }
+
+    impl Drop for FixtureServer {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(handle) = self.thread.take() {
+                let _ = handle.join();
             }
         }
     }

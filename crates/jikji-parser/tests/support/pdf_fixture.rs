@@ -3,13 +3,18 @@ use std::io::Write;
 pub fn minimal_pdf(text: &str, compressed: bool) -> Vec<u8> {
     let stream = format!("BT /F1 12 Tf 72 720 Td ({text}) Tj ET");
     let data = if compressed {
-        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(stream.as_bytes()).unwrap();
         encoder.finish().unwrap()
     } else {
         stream.into_bytes()
     };
-    let filter = if compressed { " /Filter /FlateDecode" } else { "" };
+    let filter = if compressed {
+        " /Filter /FlateDecode"
+    } else {
+        ""
+    };
     let mut content = format!("<< /Length {}{filter} >>\nstream\n", data.len()).into_bytes();
     content.extend(data);
     content.extend_from_slice(b"\nendstream");
@@ -29,10 +34,18 @@ pub fn minimal_pdf(text: &str, compressed: bool) -> Vec<u8> {
         pdf.extend_from_slice(b"\nendobj\n");
     }
     let xref = pdf.len();
-    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    pdf.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+    );
     for offset in offsets {
         pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
-    pdf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
     pdf
 }

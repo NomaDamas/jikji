@@ -171,7 +171,17 @@ fn task6_gui_open_and_reveal_protect_paths_and_token() {
         gui.manage_token()
     ));
     assert!(reveal.starts_with("HTTP/1.1 200 OK"), "{reveal}");
-    assert!(reveal.contains(root.to_string_lossy().as_ref()), "{reveal}");
+    // Compare parsed, canonical paths: the JSON body escapes backslashes and Windows canonical
+    // paths carry a `\\?\` prefix, so a substring match on the raw path only works on Unix.
+    let revealed = response_json(&reveal);
+    let revealed = revealed["path"].as_str().expect("revealed path");
+    assert_eq!(
+        Path::new(revealed)
+            .canonicalize()
+            .expect("revealed path exists"),
+        root.canonicalize().expect("root exists"),
+        "{reveal}"
+    );
 }
 
 #[test]
@@ -366,8 +376,10 @@ fn gui_find_includes_hits_from_indexed_library_roots() {
     use std::process::Command;
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let data_dir = temp.path().join("data");
-    let home = temp.path().join("home");
+    // Paths are registered canonically (macOS /var -> /private/var); build expectations from that form.
+    let temp_path = temp.path().canonicalize().expect("canonical tempdir");
+    let data_dir = temp_path.join("data");
+    let home = temp_path.join("home");
     let active = home.join("projects/app");
     let documents = home.join("Documents");
     fs::create_dir_all(&active).expect("active");
@@ -423,8 +435,10 @@ fn gui_find_keeps_nested_drive_root_when_parent_is_indexed() {
     use std::process::Command;
 
     let temp = tempfile::tempdir().expect("tempdir");
-    let data_dir = temp.path().join("data");
-    let home = temp.path().join("home");
+    // Paths are registered canonically (macOS /var -> /private/var); build expectations from that form.
+    let temp_path = temp.path().canonicalize().expect("canonical tempdir");
+    let data_dir = temp_path.join("data");
+    let home = temp_path.join("home");
     let active = home.join("projects/app");
     let drive = home.join("GoogleDrive");
     let nested = drive.join("마커");
