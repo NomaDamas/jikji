@@ -171,7 +171,11 @@ fn task6_gui_open_and_reveal_protect_paths_and_token() {
         gui.manage_token()
     ));
     assert!(reveal.starts_with("HTTP/1.1 200 OK"), "{reveal}");
-    assert!(reveal.contains(root.to_string_lossy().as_ref()), "{reveal}");
+    let revealed = response_json(&reveal);
+    assert!(
+        Path::new(revealed["path"].as_str().expect("path")).ends_with("root"),
+        "{reveal}"
+    );
 }
 
 #[test]
