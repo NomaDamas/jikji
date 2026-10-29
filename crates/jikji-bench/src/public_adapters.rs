@@ -649,6 +649,7 @@ mod tests {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
                             idle_since = std::time::Instant::now();
+                            stream.set_nonblocking(false).expect("blocking stream");
                             let path = request_path(&mut stream);
                             let bytes = handler(&path);
                             stream.write_all(&bytes).expect("respond");

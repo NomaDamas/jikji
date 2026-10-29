@@ -31,27 +31,54 @@ pub(crate) fn read_cache_text(storage_dir: &Path, cache_path: &str, limit: usize
 }
 
 pub(crate) fn read_source_text(path: PathBuf, limit: usize) -> String {
-    if limit == 0 { return String::new(); }
-    let file = match fs::File::open(&path) { Ok(file) => file, Err(_) => return String::new() };
+    if limit == 0 {
+        return String::new();
+    }
+    let file = match fs::File::open(&path) {
+        Ok(file) => file,
+        Err(_) => return String::new(),
+    };
     let max_bytes = u64::try_from(limit.saturating_mul(4)).unwrap_or(u64::MAX);
     let mut raw = Vec::new();
-    if file.take(max_bytes).read_to_end(&mut raw).is_err() { return String::new(); }
+    if file.take(max_bytes).read_to_end(&mut raw).is_err() {
+        return String::new();
+    }
     let text = if raw.starts_with(&[0xff, 0xfe]) {
-        String::from_utf16(&raw[2..].chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect::<Vec<_>>()).ok()
+        String::from_utf16(
+            &raw[2..]
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .ok()
     } else if raw.starts_with(&[0xfe, 0xff]) {
-        String::from_utf16(&raw[2..].chunks_exact(2).map(|pair| u16::from_be_bytes([pair[0], pair[1]])).collect::<Vec<_>>()).ok()
+        String::from_utf16(
+            &raw[2..]
+                .chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .ok()
     } else {
         let bytes = match std::str::from_utf8(&raw) {
             Ok(text) => text,
             Err(error) if error.error_len().is_none() && raw.len() as u64 == max_bytes => {
-                match std::str::from_utf8(&raw[..error.valid_up_to()]) { Ok(text) => text, Err(_) => return String::new() }
+                match std::str::from_utf8(&raw[..error.valid_up_to()]) {
+                    Ok(text) => text,
+                    Err(_) => return String::new(),
+                }
             }
             Err(_) => return String::new(),
         };
         Some(bytes.to_owned())
     };
-    text.filter(|value| !value.chars().any(|ch| ch == '\u{fffd}' || (ch.is_control() && !matches!(ch, '\t' | '\n' | '\r'))))
-        .map(|value| value.chars().take(limit).collect()).unwrap_or_default()
+    text.filter(|value| {
+        !value
+            .chars()
+            .any(|ch| ch == '\u{fffd}' || (ch.is_control() && !matches!(ch, '\t' | '\n' | '\r')))
+    })
+    .map(|value| value.chars().take(limit).collect())
+    .unwrap_or_default()
 }
 
 fn read_cache_dir_text(path: &Path, limit: usize) -> String {

@@ -42,7 +42,10 @@ fn root_statistics_match_full_row_counts_and_exclude_deleted_files() {
         .iter()
         .filter(|row| row["status"] == "deleted")
         .count();
-    assert_eq!(tombstones, 1, "the removed file must stay as a deleted tombstone");
+    assert_eq!(
+        tombstones, 1,
+        "the removed file must stay as a deleted tombstone"
+    );
 
     let stats = root_statistics(temp.path()).unwrap();
     assert_eq!(stats.files, live_count(temp.path(), "files"));
@@ -53,7 +56,10 @@ fn root_statistics_match_full_row_counts_and_exclude_deleted_files() {
 
     let canonical = temp.path().canonicalize().unwrap();
     let listed = indexed_roots().unwrap();
-    let entry = listed.iter().find(|item| item.root == canonical).expect("root listed");
+    let entry = listed
+        .iter()
+        .find(|item| item.root == canonical)
+        .expect("root listed");
     assert_eq!(entry.statistics, stats, "/api/roots and /api/status agree");
 }
 
@@ -64,11 +70,21 @@ fn light_lookups_agree_with_full_loads() {
     fs::write(temp.path().join("a.txt"), "alpha").unwrap();
     fs::write(temp.path().join("b.txt"), "beta").unwrap();
 
-    assert!(!has_artifacts(temp.path(), "files").unwrap(), "unprepared root has no rows");
+    assert!(
+        !has_artifacts(temp.path(), "files").unwrap(),
+        "unprepared root has no rows"
+    );
     assert_eq!(load_artifact(temp.path(), "manifest").unwrap(), None);
 
     prepare(temp.path(), &PrepareOptions::default()).unwrap();
-    for kind in ["manifest", "files", "folders", "cards", "graph", "wiki_index"] {
+    for kind in [
+        "manifest",
+        "files",
+        "folders",
+        "cards",
+        "graph",
+        "wiki_index",
+    ] {
         assert_eq!(
             has_artifacts(temp.path(), kind).unwrap(),
             !load_artifacts(temp.path(), kind).unwrap().is_empty(),
@@ -77,7 +93,10 @@ fn light_lookups_agree_with_full_loads() {
     }
     assert_eq!(
         load_artifact(temp.path(), "files").unwrap(),
-        load_artifacts(temp.path(), "files").unwrap().into_iter().next(),
+        load_artifacts(temp.path(), "files")
+            .unwrap()
+            .into_iter()
+            .next(),
         "load_artifact returns the first row in order"
     );
     let txt = load_artifacts(temp.path(), "files")
@@ -85,10 +104,23 @@ fn light_lookups_agree_with_full_loads() {
         .iter()
         .filter(|row| row["ext"] == ".txt")
         .count();
-    assert_eq!(count_artifacts_with_ext(temp.path(), "files", &[".txt"]).unwrap(), txt);
-    assert_eq!(count_artifacts_with_ext(temp.path(), "files", &[".png"]).unwrap(), 0);
-    assert_eq!(count_artifacts_with_ext(temp.path(), "files", &[]).unwrap(), 0);
+    assert_eq!(
+        count_artifacts_with_ext(temp.path(), "files", &[".txt"]).unwrap(),
+        txt
+    );
+    assert_eq!(
+        count_artifacts_with_ext(temp.path(), "files", &[".png"]).unwrap(),
+        0
+    );
+    assert_eq!(
+        count_artifacts_with_ext(temp.path(), "files", &[]).unwrap(),
+        0
+    );
 
     let report = doctor(temp.path()).unwrap();
-    assert!(report.prepared, "doctor still reports a prepared root: {:?}", report.errors);
+    assert!(
+        report.prepared,
+        "doctor still reports a prepared root: {:?}",
+        report.errors
+    );
 }

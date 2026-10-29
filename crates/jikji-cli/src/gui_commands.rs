@@ -79,9 +79,9 @@ fn access_token(flag: Option<String>) -> jikji_core::Result<ManagementToken> {
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty());
     match configured {
-        Some(value) if value.len() < 16 => {
-            Err(invalid_input("GUI access token must be at least 16 characters"))
-        }
+        Some(value) if value.len() < 16 => Err(invalid_input(
+            "GUI access token must be at least 16 characters",
+        )),
         Some(value) => Ok(ManagementToken::new(value)),
         None => ManagementToken::generate(),
     }
@@ -153,7 +153,11 @@ fn cleanup_command(pid: u32) -> String {
     format!("kill {pid}")
 }
 
-fn serve_loop(listener: TcpListener, state: GuiState, gate: AccessGate) -> jikji_core::Result<ExitCode> {
+fn serve_loop(
+    listener: TcpListener,
+    state: GuiState,
+    gate: AccessGate,
+) -> jikji_core::Result<ExitCode> {
     // Library-root discovery walks HOME / Google Drive FUSE and must not
     // run before accept(). A TCP ready probe succeeds at bind; a synchronous
     // enqueue here delayed the first /api/find by ~14s on a cold Drive cache.
@@ -223,13 +227,39 @@ mod tests {
     #[test]
     fn console_has_accessible_shell_before_network_requests() {
         let markup = INDEX_HTML.split("<script>").next().unwrap();
-        for id in ["main-content", "panel-overview", "panel-search", "panel-index", "panel-tools",
-            "nav-overview", "nav-search", "nav-index", "nav-tools", "manage-token",
-            "search-query", "roots-panel", "files-panel", "indexed-panel", "settings-dialog",
-            "search-split", "index-split", "search-preview-pane", "index-preview-pane",
-            "search-preview-modes", "index-preview-modes", "search-snippet-tab", "search-file-tab",
-            "index-snippet-tab", "index-file-tab",
-            "search-preview-back", "index-preview-back", "logout", "confirm-dialog", "jobs-strip", "cancel-job"] {
+        for id in [
+            "main-content",
+            "panel-overview",
+            "panel-search",
+            "panel-index",
+            "panel-tools",
+            "nav-overview",
+            "nav-search",
+            "nav-index",
+            "nav-tools",
+            "manage-token",
+            "search-query",
+            "roots-panel",
+            "files-panel",
+            "indexed-panel",
+            "settings-dialog",
+            "search-split",
+            "index-split",
+            "search-preview-pane",
+            "index-preview-pane",
+            "search-preview-modes",
+            "index-preview-modes",
+            "search-snippet-tab",
+            "search-file-tab",
+            "index-snippet-tab",
+            "index-file-tab",
+            "search-preview-back",
+            "index-preview-back",
+            "logout",
+            "confirm-dialog",
+            "jobs-strip",
+            "cancel-job",
+        ] {
             assert!(markup.contains(&format!("id=\"{id}\"")), "missing {id}");
         }
         assert!(markup.contains("<main"));
@@ -242,7 +272,9 @@ mod tests {
         assert!(markup.contains("파일을 선택하면 여기에 미리보기가 표시됩니다"));
         assert!(markup.contains("grid-template-columns:minmax(0,3fr) minmax(0,2fr)"));
         for scope in ["search", "index"] {
-            assert!(markup.contains(&format!("id=\"{scope}-preview-modes\" class=\"preview-modes\" role=\"tablist\"")));
+            assert!(markup.contains(&format!(
+                "id=\"{scope}-preview-modes\" class=\"preview-modes\" role=\"tablist\""
+            )));
         }
         assert!(INDEX_HTML.find("</main>").unwrap() < INDEX_HTML.find("fetch(").unwrap());
     }
@@ -251,7 +283,10 @@ mod tests {
         use std::io::Write;
         use std::process::{Command, Stdio};
         let script = INDEX_HTML.split_once("function queryRanges(").unwrap().1;
-        let helpers = format!("function queryRanges({}", script.split_once("function snippetCard(").unwrap().0);
+        let helpers = format!(
+            "function queryRanges({}",
+            script.split_once("function snippetCard(").unwrap().0
+        );
         let harness = r#"
 const assert = require('node:assert/strict');
 class Node {
@@ -309,10 +344,20 @@ console.log('typed preview, UTF-16 ranges, literal hostile text, Markdown struct
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn().expect("Node.js is required for console JavaScript behavior tests");
-        child.stdin.take().unwrap().write_all(format!("{harness}\n{helpers}\n{assertions}").as_bytes()).unwrap();
+            .spawn()
+            .expect("Node.js is required for console JavaScript behavior tests");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(format!("{harness}\n{helpers}\n{assertions}").as_bytes())
+            .unwrap();
         let output = child.wait_with_output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     #[test]
     fn console_keeps_explorer_regions_dark_and_results_score_free() {
@@ -323,7 +368,9 @@ console.log('typed preview, UTF-16 ranges, literal hostile text, Markdown struct
         assert!(markup.contains("::-webkit-scrollbar-thumb"));
         assert!(markup.contains("--scrollbar-size:8px"));
         assert!(markup.contains("height:calc(100dvh - var(--header))"));
-        assert!(markup.contains("#search-results,#files-view,#indexed-view{flex:1;min-height:0;overflow:auto"));
+        assert!(markup.contains(
+            "#search-results,#files-view,#indexed-view{flex:1;min-height:0;overflow:auto"
+        ));
         assert!(markup.contains("#roots-panel{flex:1;min-height:0;overflow:auto"));
         assert!(markup.contains("class=\"preview-title-row\""));
         assert!(markup.contains("class=\"preview-controls\""));
@@ -337,21 +384,62 @@ console.log('typed preview, UTF-16 ranges, literal hostile text, Markdown struct
     #[test]
     fn console_uses_the_api_contract_without_unsafe_dom_or_persistence() {
         let script = INDEX_HTML.split("<script>").nth(1).unwrap();
-        for route in ["/api/status", "/api/roots", "/api/files", "/api/indexed-files",
-            "/api/find", "/api/preview", "/api/preview/file", "/api/settings",
-            "/api/snippet", "/api/preview/pages", "/api/preview/page?",
-            "/api/scenarios", "/api/scenario-run", "/api/doctor", "/api/map", "/api/graph",
-            "/api/brief", "/api/clean", "/api/root", "/api/remove-root", "/api/refresh",
-            "/api/reindex", "/api/reindex-folder", "/api/remove-folder", "/api/deep-index",
-            "/api/deep-index-target", "/api/index-selection", "/api/exclude-selection",
-            "/api/jobs/", "/cancel", "/download", "/reveal", "/open", "/api/logout"] {
+        for route in [
+            "/api/status",
+            "/api/roots",
+            "/api/files",
+            "/api/indexed-files",
+            "/api/find",
+            "/api/preview",
+            "/api/preview/file",
+            "/api/settings",
+            "/api/snippet",
+            "/api/preview/pages",
+            "/api/preview/page?",
+            "/api/scenarios",
+            "/api/scenario-run",
+            "/api/doctor",
+            "/api/map",
+            "/api/graph",
+            "/api/brief",
+            "/api/clean",
+            "/api/root",
+            "/api/remove-root",
+            "/api/refresh",
+            "/api/reindex",
+            "/api/reindex-folder",
+            "/api/remove-folder",
+            "/api/deep-index",
+            "/api/deep-index-target",
+            "/api/index-selection",
+            "/api/exclude-selection",
+            "/api/jobs/",
+            "/cancel",
+            "/download",
+            "/reveal",
+            "/open",
+            "/api/logout",
+        ] {
             assert!(script.contains(route), "missing route {route}");
         }
-        for unsafe_api in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "localStorage"] {
-            assert!(!INDEX_HTML.contains(unsafe_api), "forbidden API {unsafe_api}");
+        for unsafe_api in [
+            "innerHTML",
+            "outerHTML",
+            "insertAdjacentHTML",
+            "document.write",
+            "eval(",
+            "localStorage",
+        ] {
+            assert!(
+                !INDEX_HTML.contains(unsafe_api),
+                "forbidden API {unsafe_api}"
+            );
         }
         for kind in ["document", "text", "image", "pdf", "audio", "video", "none"] {
-            assert!(script.contains(&format!("case \"{kind}\":")), "missing preview kind {kind}");
+            assert!(
+                script.contains(&format!("case \"{kind}\":")),
+                "missing preview kind {kind}"
+            );
         }
         assert!(script.contains("response.status===401"));
         assert!(script.contains("location.reload()"));
@@ -360,7 +448,10 @@ console.log('typed preview, UTF-16 ranges, literal hostile text, Markdown struct
         assert!(script.contains("modeSeq===p[modeKey]"));
         assert!(script.contains("snippetSeq"));
         assert!(script.contains("fileSeq"));
-        assert!(script.contains("img.loading=index===0?\"eager\":\"lazy\""), "first page loads at once, the rest lazily");
+        assert!(
+            script.contains("img.loading=index===0?\"eager\":\"lazy\""),
+            "first page loads at once, the rest lazily"
+        );
         assert!(script.contains("ArrowLeft"));
         assert!(script.contains("ArrowRight"));
         assert!(script.contains("document.createTextNode"));
@@ -370,7 +461,9 @@ console.log('typed preview, UTF-16 ranges, literal hostile text, Markdown struct
         assert!(script.contains("90000:20000"));
         assert!(!INDEX_HTML.contains("onclick="));
         assert!(script.contains("value.forEach(item=>p.append(key,String(item)))"));
-        assert!(script.contains("output(\"시나리오 결과\",\"/api/scenario-run\",{id:select.value})"));
+        assert!(
+            script.contains("output(\"시나리오 결과\",\"/api/scenario-run\",{id:select.value})")
+        );
         assert!(script.contains("Promise.allSettled([loadStatus(),loadRoots()"));
     }
 }

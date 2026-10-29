@@ -111,7 +111,10 @@ enum Body {
     Bytes(Vec<u8>),
     /// The next `len` bytes of an already-positioned file, streamed so large media never sits
     /// in memory.
-    File { file: File, len: u64 },
+    File {
+        file: File,
+        len: u64,
+    },
 }
 
 impl HttpResponse {
@@ -121,7 +124,11 @@ impl HttpResponse {
     }
 
     pub(crate) fn html(status: u16, text: &'static str) -> Self {
-        Self::bytes(status, text.as_bytes().to_vec(), "text/html; charset=utf-8".to_owned())
+        Self::bytes(
+            status,
+            text.as_bytes().to_vec(),
+            "text/html; charset=utf-8".to_owned(),
+        )
     }
 
     pub(crate) fn binary(status: u16, body: Vec<u8>, content_type: &'static str) -> Self {
@@ -176,7 +183,10 @@ impl HttpResponse {
         }
         .with_header("Accept-Ranges", "bytes".to_owned());
         if status == 206 {
-            response.with_header("Content-Range", format!("bytes {start}-{}/{size}", start + len - 1))
+            response.with_header(
+                "Content-Range",
+                format!("bytes {start}-{}/{size}", start + len - 1),
+            )
         } else {
             response
         }
@@ -302,7 +312,9 @@ pub(crate) fn write_response(
         Body::Bytes(body) => body.len() as u64,
         Body::File { len, .. } => *len,
     };
-    stream.write_all(&response.head(length)).map_err(write_error)?;
+    stream
+        .write_all(&response.head(length))
+        .map_err(write_error)?;
     match response.body {
         Body::Bytes(body) => stream.write_all(&body).map_err(write_error),
         Body::File { file, len } => {

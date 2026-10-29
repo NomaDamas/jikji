@@ -187,8 +187,14 @@ fn sniff_document_format(bytes: &[u8]) -> Option<&'static str> {
     if head.starts_with(b"PK\x03\x04") {
         return Some("docx");
     }
-    let text = String::from_utf8_lossy(head).trim_start_matches('\u{feff}').trim_start().to_ascii_lowercase();
-    if text.starts_with("<html") || text.starts_with("<!doctype html") || (text.starts_with("<?xml") && text.contains("<html")) {
+    let text = String::from_utf8_lossy(head)
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .to_ascii_lowercase();
+    if text.starts_with("<html")
+        || text.starts_with("<!doctype html")
+        || (text.starts_with("<?xml") && text.contains("<html"))
+    {
         return Some("html");
     }
     if text.starts_with("mime-version:") {

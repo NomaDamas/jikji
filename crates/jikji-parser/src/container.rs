@@ -145,7 +145,9 @@ fn pptx_text(bytes: &[u8], max_chars: usize) -> Option<String> {
     let mut slides: Vec<(u32, String)> = archive
         .file_names()
         .filter_map(|name| {
-            let number = name.strip_prefix("ppt/slides/slide")?.strip_suffix(".xml")?;
+            let number = name
+                .strip_prefix("ppt/slides/slide")?
+                .strip_suffix(".xml")?;
             Some((number.parse().ok()?, name.to_owned()))
         })
         .collect();
@@ -158,7 +160,9 @@ fn pptx_text(bytes: &[u8], max_chars: usize) -> Option<String> {
             return None;
         }
         let mut bytes = Vec::new();
-        file.take(remaining_bytes + 1).read_to_end(&mut bytes).ok()?;
+        file.take(remaining_bytes + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
         remaining_bytes = remaining_bytes.checked_sub(bytes.len() as u64)?;
         let slide = word_xml_text(&decode_xml_strict(&bytes)?, "a", max_chars)?;
         if slide.trim().is_empty() {
@@ -189,7 +193,11 @@ fn word_xml_text(xml: &str, ns: &str, max_chars: usize) -> Option<String> {
         }
         if let Some(cdata) = rest.strip_prefix("<![CDATA[") {
             let (body, tail) = cdata.split_once("]]>")?;
-            if skipped == 0 && stack.last().is_some_and(|name| is_word_element(name, ns, "t")) {
+            if skipped == 0
+                && stack
+                    .last()
+                    .is_some_and(|name| is_word_element(name, ns, "t"))
+            {
                 text.push_str(body);
             }
             rest = tail;
@@ -261,7 +269,11 @@ fn word_xml_text(xml: &str, ns: &str, max_chars: usize) -> Option<String> {
         } else {
             let end = rest.find('<').unwrap_or(rest.len());
             let body = &rest[..end];
-            if skipped == 0 && stack.last().is_some_and(|name| is_word_element(name, ns, "t")) {
+            if skipped == 0
+                && stack
+                    .last()
+                    .is_some_and(|name| is_word_element(name, ns, "t"))
+            {
                 let mut remaining = body;
                 while let Some((before, entity)) = remaining.split_once('&') {
                     text.push_str(before);

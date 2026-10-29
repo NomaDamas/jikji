@@ -530,8 +530,14 @@ fn gui_refuses_unauthenticated_visitors_and_sends_security_headers() {
 
     let page = gui.get_anonymous("/");
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
-    assert!(page.contains("/api/login"), "anonymous visitors only get the login page");
-    assert!(!page.contains("panel-overview"), "console markup must not be served without login");
+    assert!(
+        page.contains("/api/login"),
+        "anonymous visitors only get the login page"
+    );
+    assert!(
+        !page.contains("panel-overview"),
+        "console markup must not be served without login"
+    );
     for header in [
         "Content-Security-Policy: default-src 'self'",
         "X-Frame-Options: DENY",
@@ -551,10 +557,16 @@ fn gui_refuses_unauthenticated_visitors_and_sends_security_headers() {
     ] {
         let response = gui.get_anonymous(path);
         assert!(response.starts_with("HTTP/1.1 401"), "{path}: {response}");
-        assert!(!response.contains("private body"), "{path} leaked file content");
+        assert!(
+            !response.contains("private body"),
+            "{path} leaked file content"
+        );
     }
     let console = gui.get("/");
-    assert!(console.contains("panel-overview"), "logged-in session gets the console");
+    assert!(
+        console.contains("panel-overview"),
+        "logged-in session gets the console"
+    );
 }
 
 #[test]
@@ -565,9 +577,17 @@ fn gui_preview_reports_a_kind_for_every_format() {
     fs::write(root.join("note.md"), "# heading\nbody").expect("text");
     fs::write(root.join("big.log"), "line\n".repeat(80_000)).expect("big text");
     fs::write(root.join("pic.png"), b"\x89PNG\r\n\x1a\n").expect("png");
-    fs::write(root.join("logo.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>").expect("svg");
+    fs::write(
+        root.join("logo.svg"),
+        "<svg xmlns='http://www.w3.org/2000/svg'/>",
+    )
+    .expect("svg");
     fs::write(root.join("song.mp3"), [0u8; 64]).expect("mp3");
-    fs::write(root.join("clip.mp4"), (0u8..=255).cycle().take(4096).collect::<Vec<_>>()).expect("mp4");
+    fs::write(
+        root.join("clip.mp4"),
+        (0u8..=255).cycle().take(4096).collect::<Vec<_>>(),
+    )
+    .expect("mp4");
     fs::write(root.join("bundle.zip"), b"PK\x03\x04").expect("zip");
     fs::write(root.join("blob.bin"), [0, 1, 2, 3]).expect("bin");
     let gui = GuiChild::start(&root);
@@ -593,10 +613,16 @@ fn gui_preview_reports_a_kind_for_every_format() {
 
     let range = gui.get_with_header("/api/preview/file?path=clip.mp4", "Range: bytes=100-199");
     assert!(range.starts_with("HTTP/1.1 206"), "{range}");
-    assert!(range.contains("Content-Range: bytes 100-199/4096"), "{range}");
+    assert!(
+        range.contains("Content-Range: bytes 100-199/4096"),
+        "{range}"
+    );
     assert!(range.contains("Content-Length: 100"), "{range}");
     let whole = gui.get("/api/preview/file?path=clip.mp4");
-    assert!(whole.starts_with("HTTP/1.1 200") && whole.contains("Accept-Ranges: bytes"), "{whole}");
+    assert!(
+        whole.starts_with("HTTP/1.1 200") && whole.contains("Accept-Ranges: bytes"),
+        "{whole}"
+    );
     let past_end = gui.get_with_header("/api/preview/file?path=clip.mp4", "Range: bytes=5000-");
     assert!(past_end.starts_with("HTTP/1.1 416"), "{past_end}");
 }
@@ -606,17 +632,35 @@ fn gui_document_preview_uses_parsed_text_and_rejects_binary_endpoints() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().join("root");
     fs::create_dir(&root).expect("root");
-    fs::write(root.join("plan_v0.1.final.docx"), minimal_docx("😀가 Contract Needle body")).expect("docx");
+    fs::write(
+        root.join("plan_v0.1.final.docx"),
+        minimal_docx("😀가 Contract Needle body"),
+    )
+    .expect("docx");
     let gui = GuiChild::start(&root);
     let preview = response_json(&gui.get("/api/preview?path=plan_v0.1.final.docx&q=needle"));
     assert_eq!(preview["kind"], "document", "{preview}");
     assert_eq!(preview["source"], "parsed_now", "{preview}");
-    assert!(preview["content"].as_str().expect("content").contains("Contract Needle body"));
+    assert!(
+        preview["content"]
+            .as_str()
+            .expect("content")
+            .contains("Contract Needle body")
+    );
     assert_eq!(preview["matches"][0]["start"], 13);
     assert_eq!(preview["matches"][0]["end"], 19);
-    assert!(gui.get("/api/preview/file?path=plan_v0.1.final.docx").starts_with("HTTP/1.1 415"));
-    assert!(gui.get("/api/preview/pages?path=plan_v0.1.final.docx").starts_with("HTTP/1.1 415"));
-    assert!(gui.get("/api/preview/page?path=plan_v0.1.final.docx&page=1").starts_with("HTTP/1.1 415"));
+    assert!(
+        gui.get("/api/preview/file?path=plan_v0.1.final.docx")
+            .starts_with("HTTP/1.1 415")
+    );
+    assert!(
+        gui.get("/api/preview/pages?path=plan_v0.1.final.docx")
+            .starts_with("HTTP/1.1 415")
+    );
+    assert!(
+        gui.get("/api/preview/page?path=plan_v0.1.final.docx&page=1")
+            .starts_with("HTTP/1.1 415")
+    );
 }
 
 /// Minimal valid DOCX (Office Open XML) holding `text` as one paragraph.
@@ -650,21 +694,46 @@ fn gui_find_and_snippet_use_indexed_docx_body_without_cache_headers() {
     json_cmd(["prepare", path_str(&root).as_str(), "--json"]);
     let gui = GuiChild::start(&root);
     let found = response_json(&gui.get("/api/find?q=needlepreview2026"));
-    let snippet = found["candidates"].as_array().expect("candidates").iter()
-        .find(|candidate| candidate["p"] == "report.docx").expect("docx candidate")
-        ["preview_snippet"].as_str().expect("preview snippet");
-    assert!(snippet.contains("needlepreview2026 body marker"), "{snippet}");
-    assert!(!snippet.contains("# Source:") && !snippet.contains("# File ID:"), "{snippet}");
+    let snippet = found["candidates"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .find(|candidate| candidate["p"] == "report.docx")
+        .expect("docx candidate")["preview_snippet"]
+        .as_str()
+        .expect("preview snippet");
+    assert!(
+        snippet.contains("needlepreview2026 body marker"),
+        "{snippet}"
+    );
+    assert!(
+        !snippet.contains("# Source:") && !snippet.contains("# File ID:"),
+        "{snippet}"
+    );
     assert!(snippet.chars().count() <= 242, "{snippet}");
     let docx = response_json(&gui.get("/api/snippet?path=report.docx&q=NEEDLEPREVIEW2026"));
-    assert!(docx["text"].as_str().expect("text").contains("needlepreview2026 body marker"));
+    assert!(
+        docx["text"]
+            .as_str()
+            .expect("text")
+            .contains("needlepreview2026 body marker")
+    );
     assert_eq!(docx["matches"].as_array().expect("matches").len(), 1);
     assert!(!docx["text"].as_str().expect("text").contains("# Source:"));
     fs::remove_file(root.join("report.docx")).expect("remove");
     let moved = response_json(&gui.get("/api/snippet?path=report.docx"));
-    assert!(moved["text"].as_str().expect("text").contains("body marker"), "{moved}");
+    assert!(
+        moved["text"]
+            .as_str()
+            .expect("text")
+            .contains("body marker"),
+        "{moved}"
+    );
     assert_rejected(&gui.get("/api/snippet?path=../outside.txt"));
-    assert!(gui.get_anonymous("/api/snippet?path=notes.md").starts_with("HTTP/1.1 401"));
+    assert!(
+        gui.get_anonymous("/api/snippet?path=notes.md")
+            .starts_with("HTTP/1.1 401")
+    );
 }
 
 #[test]
@@ -682,7 +751,10 @@ fn gui_pdf_pages_stay_native_and_malformed_documents_fail_gracefully() {
     let pdf = response_json(&gui.get("/api/preview?path=native.pdf"));
     assert_eq!(pdf["kind"], "pdf", "{pdf}");
     let file = gui.get("/api/preview/file?path=native.pdf");
-    assert!(file.starts_with("HTTP/1.1 200") && file.contains("Content-Type: application/pdf"), "{file}");
+    assert!(
+        file.starts_with("HTTP/1.1 200") && file.contains("Content-Type: application/pdf"),
+        "{file}"
+    );
     let pages = response_json(&gui.get("/api/preview/pages?path=native.pdf"));
     assert_eq!(pages["converter"], "native-pdf", "{pages}");
     assert_eq!(pages["pages"], 1, "{pages}");
@@ -702,8 +774,12 @@ fn minimal_pdf() -> Vec<u8> {
     }
     let xref = body.len();
     body.extend_from_slice(b"xref\n0 4\n0000000000 65535 f \n");
-    for offset in offsets { body.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes()); }
-    body.extend_from_slice(format!("trailer\n<< /Root 1 0 R /Size 4 >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+    for offset in offsets {
+        body.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    body.extend_from_slice(
+        format!("trailer\n<< /Root 1 0 R /Size 4 >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+    );
     body
 }
 

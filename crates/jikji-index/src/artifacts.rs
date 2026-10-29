@@ -6,18 +6,18 @@ use jikji_core::storage::{
     canonical_root, ensure_prepare_root_allowed, load_artifacts, replace_prepared_artifacts,
     root_storage_dir,
 };
-use jikji_core::{ensure_generated_dir, io_error, PrepareOptions, Result};
-use jikji_search::{build_search_artifacts, SearchArtifactStats};
+use jikji_core::{PrepareOptions, Result, ensure_generated_dir, io_error};
+use jikji_search::{SearchArtifactStats, build_search_artifacts};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::artifact_rows::{deleted_rows, file_rows, folder_rows, merge_document_fields};
 use crate::artifact_writer::write_static_artifacts;
-use crate::doc_cache::{document_rows, CacheDirs};
+use crate::doc_cache::{CacheDirs, document_rows};
 use crate::doc_prune::prune_doc_caches;
 use crate::file_io::write_jsonl;
 use crate::lock::LockGuard;
-use crate::scan::{rel_path, scan_root, ScanResult};
+use crate::scan::{ScanResult, rel_path, scan_root};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PrepareResult {
     pub root: PathBuf,
@@ -75,7 +75,11 @@ fn build_artifacts(scan: ScanResult, options: &PrepareOptions) -> Result<Prepare
         .iter()
         .map(|path| rel_path(&scan.root, path))
         .collect::<BTreeSet<_>>();
-    let mut deleted_rows = if options.clean_reindex { Vec::new() } else { deleted_rows(&previous, &current_paths) };
+    let mut deleted_rows = if options.clean_reindex {
+        Vec::new()
+    } else {
+        deleted_rows(&previous, &current_paths)
+    };
     let mut file_rows = file_rows(&scan, options)?;
     let folder_rows = folder_rows(&scan);
     let docs = document_rows(

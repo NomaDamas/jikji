@@ -61,7 +61,13 @@ impl GuiChild {
             let _ = child.wait();
             panic!("connect GUI: {error}");
         }
-        let login = http_request_with("POST", &url, "/api/login", &format!("token={access_token}"), "");
+        let login = http_request_with(
+            "POST",
+            &url,
+            "/api/login",
+            &format!("token={access_token}"),
+            "",
+        );
         let session = session_cookie(&login).unwrap_or_else(|| panic!("GUI login failed: {login}"));
         Self {
             url,
@@ -224,7 +230,13 @@ fn http_request_with(method: &str, base_url: &str, path: &str, body: &str, cooki
                 );
                 stream.write_all(request.as_bytes()).expect("write");
                 let mut response = Vec::new();
-                stream.read_to_end(&mut response).expect("read");
+                match stream.read_to_end(&mut response) {
+                    Ok(_) => {}
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::ConnectionReset
+                            && !response.is_empty() => {}
+                    Err(error) => panic!("read {method} {path}: {error}"),
+                }
                 return String::from_utf8_lossy(&response).into_owned();
             }
             Err(error) if started.elapsed() < Duration::from_secs(5) => {

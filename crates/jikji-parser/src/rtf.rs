@@ -3,10 +3,35 @@
 //! e.g. 949 for Korean) and `\uN` Unicode escapes honouring `\ucN` fallback counts.
 
 const SKIPPED_DESTINATIONS: &[&str] = &[
-    "fonttbl", "colortbl", "stylesheet", "listtable", "listoverridetable", "info", "pict",
-    "object", "objdata", "themedata", "colorschememapping", "datastore", "latentstyles",
-    "rsidtbl", "generator", "xmlnstbl", "mmathPr", "header", "footer", "headerl", "headerr",
-    "footerl", "footerr", "headerf", "footerf", "fldinst", "filetbl", "revtbl", "pgdsctbl",
+    "fonttbl",
+    "colortbl",
+    "stylesheet",
+    "listtable",
+    "listoverridetable",
+    "info",
+    "pict",
+    "object",
+    "objdata",
+    "themedata",
+    "colorschememapping",
+    "datastore",
+    "latentstyles",
+    "rsidtbl",
+    "generator",
+    "xmlnstbl",
+    "mmathPr",
+    "header",
+    "footer",
+    "headerl",
+    "headerr",
+    "footerl",
+    "footerr",
+    "headerf",
+    "footerf",
+    "fldinst",
+    "filetbl",
+    "revtbl",
+    "pgdsctbl",
 ];
 
 fn encoding_for_codepage(codepage: u32) -> &'static encoding_rs::Encoding {
@@ -46,7 +71,10 @@ pub(crate) fn rtf_text(bytes: &[u8], max_chars: usize) -> Option<String> {
     let mut chars = 0usize;
     let mut i = 0usize;
 
-    let flush = |pending: &mut Vec<u8>, out: &mut String, encoding: &'static encoding_rs::Encoding, chars: &mut usize| {
+    let flush = |pending: &mut Vec<u8>,
+                 out: &mut String,
+                 encoding: &'static encoding_rs::Encoding,
+                 chars: &mut usize| {
         if pending.is_empty() {
             return;
         }
@@ -83,7 +111,9 @@ pub(crate) fn rtf_text(bytes: &[u8], max_chars: usize) -> Option<String> {
                 i += 1;
                 let Some(&next) = bytes.get(i) else { break };
                 if next == b'\'' {
-                    let hex = bytes.get(i + 1..i + 3).and_then(|pair| std::str::from_utf8(pair).ok());
+                    let hex = bytes
+                        .get(i + 1..i + 3)
+                        .and_then(|pair| std::str::from_utf8(pair).ok());
                     i += 3;
                     if skip_fallback > 0 {
                         skip_fallback -= 1;
@@ -129,7 +159,9 @@ pub(crate) fn rtf_text(bytes: &[u8], max_chars: usize) -> Option<String> {
                 while i < bytes.len() && bytes[i].is_ascii_digit() {
                     i += 1;
                 }
-                let param = std::str::from_utf8(&bytes[num_start..i]).ok().and_then(|value| value.parse::<i64>().ok());
+                let param = std::str::from_utf8(&bytes[num_start..i])
+                    .ok()
+                    .and_then(|value| value.parse::<i64>().ok());
                 if bytes.get(i) == Some(&b' ') {
                     i += 1;
                 }
@@ -143,13 +175,18 @@ pub(crate) fn rtf_text(bytes: &[u8], max_chars: usize) -> Option<String> {
                             encoding = encoding_for_codepage(page);
                         }
                     }
-                    "uc" => current.uc = param.and_then(|value| usize::try_from(value).ok()).unwrap_or(1),
+                    "uc" => {
+                        current.uc = param
+                            .and_then(|value| usize::try_from(value).ok())
+                            .unwrap_or(1)
+                    }
                     "u" => {
                         if let Some(value) = param {
                             let code = if value < 0 { value + 65_536 } else { value };
                             if !current.skip {
                                 flush(&mut pending, &mut out, encoding, &mut chars);
-                                if let Some(ch) = u32::try_from(code).ok().and_then(char::from_u32) {
+                                if let Some(ch) = u32::try_from(code).ok().and_then(char::from_u32)
+                                {
                                     if chars < max_chars {
                                         out.push(ch);
                                         chars += 1;

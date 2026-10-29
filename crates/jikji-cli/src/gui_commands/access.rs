@@ -78,10 +78,7 @@ impl AccessGate {
 
     pub(crate) fn check(&self, request: &HttpRequest) -> Gate {
         if !self.host_allowed(request.header("host")) {
-            return Gate::Respond(HttpResponse::json(
-                421,
-                json!({"error": "unknown host"}),
-            ));
+            return Gate::Respond(HttpResponse::json(421, json!({"error": "unknown host"})));
         }
         match (request.method.as_str(), request.path.as_str()) {
             ("POST", "/api/login") => return Gate::Respond(self.login(request)),
@@ -109,7 +106,10 @@ impl AccessGate {
         let host = host.trim().to_ascii_lowercase();
         let name = match host.strip_prefix('[') {
             Some(rest) => rest.split(']').next().unwrap_or_default().to_owned(),
-            None => host.rsplit_once(':').map_or(host.as_str(), |(name, _)| name).to_owned(),
+            None => host
+                .rsplit_once(':')
+                .map_or(host.as_str(), |(name, _)| name)
+                .to_owned(),
         };
         matches!(name.as_str(), "127.0.0.1" | "localhost" | "::1")
             || self.allowed_hosts.iter().any(|allowed| allowed == &name)
@@ -251,7 +251,9 @@ impl AccessGate {
 
     #[cfg(test)]
     fn tracked_clients(&self) -> usize {
-        self.failures.lock().map_or(usize::MAX, |failures| failures.len())
+        self.failures
+            .lock()
+            .map_or(usize::MAX, |failures| failures.len())
     }
 }
 
@@ -296,7 +298,10 @@ mod tests {
     }
 
     fn gate() -> AccessGate {
-        AccessGate::new(ManagementToken::new("secret-token".to_owned()), vec!["share.example.com".to_owned()])
+        AccessGate::new(
+            ManagementToken::new("secret-token".to_owned()),
+            vec!["share.example.com".to_owned()],
+        )
     }
 
     fn status(outcome: Gate) -> u16 {
@@ -325,36 +330,73 @@ mod tests {
     fn everything_needs_a_session_except_the_login_page() {
         let gate = gate();
         let host = [("Host", "127.0.0.1:8765")];
-        assert_eq!(status(gate.check(&request("GET", "/", &host, ""))), 200, "login page");
-        for path in ["/api/status", "/api/find?q=x", "/api/preview?path=a", "/download?path=a"] {
-            assert_eq!(status(gate.check(&request("GET", path, &host, ""))), 401, "{path}");
+        assert_eq!(
+            status(gate.check(&request("GET", "/", &host, ""))),
+            200,
+            "login page"
+        );
+        for path in [
+            "/api/status",
+            "/api/find?q=x",
+            "/api/preview?path=a",
+            "/download?path=a",
+        ] {
+            assert_eq!(
+                status(gate.check(&request("GET", path, &host, ""))),
+                401,
+                "{path}"
+            );
         }
-        assert_eq!(status(gate.check(&request("POST", "/api/refresh", &host, ""))), 401);
+        assert_eq!(
+            status(gate.check(&request("POST", "/api/refresh", &host, ""))),
+            401
+        );
 
         let cookie = login_cookie(&gate);
         let authed = [("Host", "127.0.0.1:8765"), ("Cookie", cookie.as_str())];
-        assert!(matches!(gate.check(&request("GET", "/api/status", &authed, "")), Gate::Allow));
-        assert!(matches!(gate.check(&request("GET", "/", &authed, "")), Gate::Allow));
+        assert!(matches!(
+            gate.check(&request("GET", "/api/status", &authed, "")),
+            Gate::Allow
+        ));
+        assert!(matches!(
+            gate.check(&request("GET", "/", &authed, "")),
+            Gate::Allow
+        ));
 
         let forged = format!("{SESSION_COOKIE}=not-a-session");
         let forged = [("Host", "127.0.0.1:8765"), ("Cookie", forged.as_str())];
-        assert_eq!(status(gate.check(&request("GET", "/api/status", &forged, ""))), 401);
+        assert_eq!(
+            status(gate.check(&request("GET", "/api/status", &forged, ""))),
+            401
+        );
     }
 
     #[test]
     fn wrong_tokens_are_rejected_and_rate_limited() {
         let gate = gate();
-        let from = [("Host", "share.example.com"), ("CF-Connecting-IP", "203.0.113.9")];
+        let from = [
+            ("Host", "share.example.com"),
+            ("CF-Connecting-IP", "203.0.113.9"),
+        ];
         for _ in 0..5 {
-            assert_eq!(status(gate.check(&request("POST", "/api/login", &from, "token=guess"))), 401);
+            assert_eq!(
+                status(gate.check(&request("POST", "/api/login", &from, "token=guess"))),
+                401
+            );
         }
         assert_eq!(
             status(gate.check(&request("POST", "/api/login", &from, "token=secret-token"))),
             429,
             "even the right token is refused while locked out"
         );
-        let other = [("Host", "share.example.com"), ("CF-Connecting-IP", "198.51.100.4")];
-        assert_eq!(status(gate.check(&request("POST", "/api/login", &other, "token=secret-token"))), 204);
+        let other = [
+            ("Host", "share.example.com"),
+            ("CF-Connecting-IP", "198.51.100.4"),
+        ];
+        assert_eq!(
+            status(gate.check(&request("POST", "/api/login", &other, "token=secret-token"))),
+            204
+        );
     }
 
     #[test]
@@ -363,16 +405,29 @@ mod tests {
         let Gate::Respond(response) = gate.check(&request(
             "GET",
             "/?access=secret-token",
-            &[("Host", "share.example.com"), ("X-Forwarded-Proto", "https")],
+            &[
+                ("Host", "share.example.com"),
+                ("X-Forwarded-Proto", "https"),
+            ],
             "",
         )) else {
             panic!("link login must answer");
         };
         assert_eq!(response.status(), 303);
         assert_eq!(response.header_value("Location"), Some("/"));
-        assert!(response.header_value("Set-Cookie").unwrap().contains("; Secure"));
+        assert!(
+            response
+                .header_value("Set-Cookie")
+                .unwrap()
+                .contains("; Secure")
+        );
         assert_eq!(
-            status(gate.check(&request("GET", "/?access=wrong", &[("Host", "127.0.0.1")], ""))),
+            status(gate.check(&request(
+                "GET",
+                "/?access=wrong",
+                &[("Host", "127.0.0.1")],
+                ""
+            ))),
             401
         );
     }
@@ -380,10 +435,19 @@ mod tests {
     #[test]
     fn unknown_hosts_and_missing_host_are_refused() {
         let gate = gate();
-        assert_eq!(status(gate.check(&request("GET", "/", &[("Host", "evil.example")], ""))), 421);
+        assert_eq!(
+            status(gate.check(&request("GET", "/", &[("Host", "evil.example")], ""))),
+            421
+        );
         assert_eq!(status(gate.check(&request("GET", "/", &[], ""))), 421);
-        assert_eq!(status(gate.check(&request("GET", "/", &[("Host", "[::1]:8765")], ""))), 200);
-        assert_eq!(status(gate.check(&request("GET", "/", &[("Host", "localhost")], ""))), 200);
+        assert_eq!(
+            status(gate.check(&request("GET", "/", &[("Host", "[::1]:8765")], ""))),
+            200
+        );
+        assert_eq!(
+            status(gate.check(&request("GET", "/", &[("Host", "localhost")], ""))),
+            200
+        );
     }
 
     #[test]
@@ -391,8 +455,14 @@ mod tests {
         let gate = gate();
         let cookie = login_cookie(&gate);
         let authed = [("Host", "127.0.0.1"), ("Cookie", cookie.as_str())];
-        assert_eq!(status(gate.check(&request("POST", "/api/logout", &authed, ""))), 204);
-        assert_eq!(status(gate.check(&request("GET", "/api/status", &authed, ""))), 401);
+        assert_eq!(
+            status(gate.check(&request("POST", "/api/logout", &authed, ""))),
+            204
+        );
+        assert_eq!(
+            status(gate.check(&request("GET", "/api/status", &authed, ""))),
+            401
+        );
     }
 }
 
@@ -439,6 +509,9 @@ mod lockout_tests {
             gate.record_failure(format!("client-{attempt}"));
         }
         let tracked = gate.tracked_clients();
-        assert!(tracked <= MAX_TRACKED_CLIENTS + 2, "tracked {tracked} clients");
+        assert!(
+            tracked <= MAX_TRACKED_CLIENTS + 2,
+            "tracked {tracked} clients"
+        );
     }
 }

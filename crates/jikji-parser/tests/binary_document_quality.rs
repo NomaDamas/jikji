@@ -22,9 +22,13 @@ fn valid_plain_and_compressed_pdf_extract_rendered_text() {
 fn malformed_random_and_compressed_bytes_never_scrape_binary() {
     let registry = ParserRegistry::with_defaults();
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(b"random metadata (must-not-index)").unwrap();
+    encoder
+        .write_all(b"random metadata (must-not-index)")
+        .unwrap();
     let compressed = encoder.finish().unwrap();
-    let random = (0..4096).map(|i| ((i * 73 + 19) % 256) as u8).collect::<Vec<_>>();
+    let random = (0..4096)
+        .map(|i| ((i * 73 + 19) % 256) as u8)
+        .collect::<Vec<_>>();
     let pdf = pdf_fixture::minimal_pdf("truncated-token", false);
     let cases = [
         b"%PDF-1.7\nnot actually a document".as_slice(),
@@ -43,7 +47,11 @@ fn malformed_random_and_compressed_bytes_never_scrape_binary() {
 
 #[test]
 fn valid_pdf_without_rendered_text_is_metadata_only() {
-    let parsed = ParserRegistry::with_defaults().parse_bytes("blank.pdf", &pdf_fixture::minimal_pdf("", false), 4_000);
+    let parsed = ParserRegistry::with_defaults().parse_bytes(
+        "blank.pdf",
+        &pdf_fixture::minimal_pdf("", false),
+        4_000,
+    );
     assert_eq!(parsed.status, ParseStatus::MetadataOnly);
     assert!(parsed.text.is_empty());
 }
@@ -77,6 +85,10 @@ fn doc_files_that_are_really_rtf_or_docx_are_parsed_by_content() {
     );
     assert_eq!(rtf.status, ParseStatus::Success);
     assert_eq!(rtf.text, "챗봇 body");
-    let html = registry.parse_bytes("exported.doc", b"<html><body><p>html marker</p></body></html>", 4_000);
+    let html = registry.parse_bytes(
+        "exported.doc",
+        b"<html><body><p>html marker</p></body></html>",
+        4_000,
+    );
     assert!(html.text.contains("html marker"), "{html:?}");
 }

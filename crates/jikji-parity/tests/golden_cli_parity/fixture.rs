@@ -152,8 +152,17 @@ fn rust_bin() -> &'static PathBuf {
             .status()
             .expect("cargo build jikji");
         assert!(status.success(), "failed to build Rust CLI binary");
-        workspace_root()
-            .join("target")
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    workspace_root().join(path)
+                }
+            })
+            .unwrap_or_else(|| workspace_root().join("target"));
+        target_dir
             .join("debug")
             .join(format!("jikji{}", std::env::consts::EXE_SUFFIX))
     })

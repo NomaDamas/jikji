@@ -44,15 +44,33 @@ impl DocumentParser for SubtitleParser {
         let Some(raw) = decode_text_strict(input.bytes, input.max_chars.saturating_mul(4)) else {
             return ParsedDocument::failed(self.name());
         };
-        let timing = Regex::new(r"^\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}.*$");
+        let timing = Regex::new(
+            r"^\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}.*$",
+        );
         let mut parts = Vec::new();
         let mut previous_blank = true;
         for line in raw.lines() {
             let stripped = line.trim();
-            if stripped.is_empty() { previous_blank = true; continue; }
-            if stripped == "WEBVTT" || stripped.starts_with("NOTE") || stripped.starts_with("STYLE") || stripped.starts_with("REGION") { previous_blank = false; continue; }
-            if timing.as_ref().is_ok_and(|regex| regex.is_match(stripped)) { previous_blank = false; continue; }
-            if previous_blank && stripped.chars().all(|ch| ch.is_ascii_digit()) { previous_blank = false; continue; }
+            if stripped.is_empty() {
+                previous_blank = true;
+                continue;
+            }
+            if stripped == "WEBVTT"
+                || stripped.starts_with("NOTE")
+                || stripped.starts_with("STYLE")
+                || stripped.starts_with("REGION")
+            {
+                previous_blank = false;
+                continue;
+            }
+            if timing.as_ref().is_ok_and(|regex| regex.is_match(stripped)) {
+                previous_blank = false;
+                continue;
+            }
+            if previous_blank && stripped.chars().all(|ch| ch.is_ascii_digit()) {
+                previous_blank = false;
+                continue;
+            }
             previous_blank = false;
             parts.push(stripped.to_owned());
         }
@@ -64,11 +82,21 @@ impl DocumentParser for SubtitleParser {
 pub struct HtmlParser;
 
 impl DocumentParser for HtmlParser {
-    fn name(&self) -> &'static str { "html" }
-    fn supports_extension(&self, extension: &str) -> bool { matches!(extension, "html" | "htm") }
+    fn name(&self) -> &'static str {
+        "html"
+    }
+    fn supports_extension(&self, extension: &str) -> bool {
+        matches!(extension, "html" | "htm")
+    }
     fn parse(&self, input: ParserInput<'_>) -> ParsedDocument {
-        let Some(raw) = decode_text_strict(input.bytes, input.max_chars.saturating_mul(6)) else { return ParsedDocument::failed(self.name()); };
-        ParsedDocument::new(strip_html(raw.as_str(), input.max_chars), ParseStatus::Success, self.name())
+        let Some(raw) = decode_text_strict(input.bytes, input.max_chars.saturating_mul(6)) else {
+            return ParsedDocument::failed(self.name());
+        };
+        ParsedDocument::new(
+            strip_html(raw.as_str(), input.max_chars),
+            ParseStatus::Success,
+            self.name(),
+        )
     }
 }
 
@@ -76,17 +104,21 @@ impl DocumentParser for HtmlParser {
 pub struct RtfParser;
 
 impl DocumentParser for RtfParser {
-    fn name(&self) -> &'static str { "rtf" }
-    fn supports_extension(&self, extension: &str) -> bool { extension == "rtf" }
+    fn name(&self) -> &'static str {
+        "rtf"
+    }
+    fn supports_extension(&self, extension: &str) -> bool {
+        extension == "rtf"
+    }
     fn parse(&self, input: ParserInput<'_>) -> ParsedDocument {
         match crate::rtf::rtf_text(input.bytes, input.max_chars) {
-            Some(text) if !text.trim().is_empty() => ParsedDocument::new(text, ParseStatus::Success, self.name()),
+            Some(text) if !text.trim().is_empty() => {
+                ParsedDocument::new(text, ParseStatus::Success, self.name())
+            }
             _ => ParsedDocument::failed(self.name()),
         }
     }
 }
-
-
 
 fn strip_html(html: &str, max_chars: usize) -> String {
     let mut parts = Vec::new();

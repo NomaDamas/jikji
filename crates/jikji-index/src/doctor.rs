@@ -72,7 +72,9 @@ pub fn doctor(root: &Path) -> Result<DoctorReport> {
     let image_docs = count_artifacts_with_ext(
         &clean_root,
         "documents",
-        &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff", ".bmp"],
+        &[
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff", ".bmp",
+        ],
     )?;
     let media = manifest
         .get("media_index")

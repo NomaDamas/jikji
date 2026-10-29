@@ -119,11 +119,6 @@ impl DocumentParser for SqliteParser {
     }
 }
 
-pub fn html_or_xml_to_text(bytes: &[u8], max_chars: usize) -> String {
-    let raw = decode_text(bytes, max_chars.saturating_mul(6));
-    strip_xml_tags(raw.as_str(), max_chars)
-}
-
 fn collect_mail_parts(mail: &mailparse::ParsedMail<'_>, parts: &mut Vec<String>) {
     if mail.subparts.is_empty() {
         let mimetype = mail.ctype.mimetype.to_ascii_lowercase();

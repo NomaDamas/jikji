@@ -1,4 +1,4 @@
-use encoding_rs::{Encoding, EUC_KR, UTF_8, UTF_16BE, UTF_16LE};
+use encoding_rs::{EUC_KR, Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use regex::Regex;
 
 pub fn decode_text(bytes: &[u8], max_chars: usize) -> String {
@@ -42,7 +42,11 @@ pub fn decode_xml_strict(bytes: &[u8]) -> Option<String> {
     } else {
         (None, 0)
     };
-    let prefix: String = bytes.iter().take_while(|byte| byte.is_ascii()).map(|byte| char::from(*byte)).collect();
+    let prefix: String = bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii())
+        .map(|byte| char::from(*byte))
+        .collect();
     let declared = xml_declared_encoding(prefix.as_str());
     let encoding = match (detected, declared) {
         (Some(encoding), _) => encoding,
@@ -52,8 +56,8 @@ pub fn decode_xml_strict(bytes: &[u8]) -> Option<String> {
     let text = decode_with_strict(encoding, &bytes[skip..])?;
     if let Some(label) = xml_declared_encoding(text.as_str()) {
         let declared = Encoding::for_label(label.as_bytes())?;
-        let generic_utf16 = label.eq_ignore_ascii_case("utf-16")
-            && (encoding == UTF_16LE || encoding == UTF_16BE);
+        let generic_utf16 =
+            label.eq_ignore_ascii_case("utf-16") && (encoding == UTF_16LE || encoding == UTF_16BE);
         if declared != encoding && !generic_utf16 {
             return None;
         }
@@ -70,7 +74,9 @@ fn decode_with_strict(encoding: &'static encoding_rs::Encoding, bytes: &[u8]) ->
 }
 
 fn is_text(text: &str) -> bool {
-    !text.chars().any(|ch| ch == '\u{fffd}' || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t' | '\u{c}')))
+    !text.chars().any(|ch| {
+        ch == '\u{fffd}' || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t' | '\u{c}'))
+    })
 }
 
 fn xml_declared_encoding(text: &str) -> Option<&str> {
@@ -150,7 +156,6 @@ pub fn strip_xml_tags(xml: &str, max_chars: usize) -> String {
     }
     normalize_lines(&parts, max_chars)
 }
-
 
 fn decode_entity(entity: &str) -> &'static str {
     match entity {

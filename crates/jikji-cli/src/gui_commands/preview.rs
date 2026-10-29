@@ -58,7 +58,11 @@ pub(crate) fn snippet_payload(
     let is_docx = full.is_some_and(|path| {
         path.extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ["docx", "pptx", "ppsx"].iter().any(|known| ext.eq_ignore_ascii_case(known)))
+            .is_some_and(|ext| {
+                ["docx", "pptx", "ppsx"]
+                    .iter()
+                    .any(|known| ext.eq_ignore_ascii_case(known))
+            })
     });
     let original_docx = full
         .filter(|path| path.is_file() && is_docx)
@@ -162,8 +166,9 @@ const MAX_PARSE_NOW_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Extensions parsed on demand by Jikji's bounds-checked parsers. PDF is deliberately excluded:
 /// its third-party parser can panic and release builds use `panic = "abort"`.
-const PARSE_NOW_EXTENSIONS: &[&str] =
-    &["docx", "pptx", "ppsx", "doc", "dot", "ppt", "pps", "pot", "hwp", "rtf"];
+const PARSE_NOW_EXTENSIONS: &[&str] = &[
+    "docx", "pptx", "ppsx", "doc", "dot", "ppt", "pps", "pot", "hwp", "rtf",
+];
 
 /// Text extracted from the original file with the indexer's own parsers, when they know the
 /// format and produce readable text. Plain text files are left to `read_text_preview`.

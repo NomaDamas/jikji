@@ -70,12 +70,16 @@ pub fn database_path() -> Result<PathBuf> {
 /// Returns `(bytes_before, bytes_after)`; this never touches source roots.
 pub fn vacuum_database() -> Result<(u64, u64)> {
     let path = database_path()?;
-    let before = fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+    let before = fs::metadata(&path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     let connection = open_database()?;
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")
         .map_err(|source| sqlite_error(&path, source))?;
-    let after = fs::metadata(&path).map(|metadata| metadata.len()).unwrap_or(0);
+    let after = fs::metadata(&path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
     Ok((before, after))
 }
 
@@ -204,7 +208,6 @@ pub fn ensure_prepare_root_allowed(root: &Path) -> Result<()> {
     Ok(())
 }
 
-
 fn unresolved_root_keys(root: &Path) -> Vec<String> {
     let mut keys = Vec::new();
     push_unresolved_key(&mut keys, root);
@@ -216,6 +219,13 @@ fn unresolved_root_keys(root: &Path) -> Vec<String> {
         if let Ok(absolute) = std::path::absolute(&target) {
             push_unresolved_key(&mut keys, &absolute);
         }
+    }
+    if !keys
+        .iter()
+        .any(|key| cloud_drive_path_blocked(Path::new(key)))
+        && let Ok(canonical) = root.canonicalize()
+    {
+        push_unresolved_key(&mut keys, &canonical);
     }
     keys
 }
@@ -436,10 +446,18 @@ pub fn replace_artifacts(root: &Path, artifacts: &[(&str, Value)]) -> Result<()>
 
 /// Replace all prepare-owned row kinds, including empty collections, in one transaction.
 pub fn replace_prepared_artifacts(root: &Path, artifacts: &[(&str, Value)]) -> Result<()> {
-    replace_artifact_rows(root, artifacts, &["files", "folders", "documents", "chunks", "cards"])
+    replace_artifact_rows(
+        root,
+        artifacts,
+        &["files", "folders", "documents", "chunks", "cards"],
+    )
 }
 
-fn replace_artifact_rows(root: &Path, artifacts: &[(&str, Value)], empty_kinds: &[&str]) -> Result<()> {
+fn replace_artifact_rows(
+    root: &Path,
+    artifacts: &[(&str, Value)],
+    empty_kinds: &[&str],
+) -> Result<()> {
     let mut connection = open_database()?;
     let tx = connection.transaction().map_err(sqlite_error_path)?;
     let root_id = ensure_root_tx(&tx, root)?;
@@ -448,8 +466,11 @@ fn replace_artifact_rows(root: &Path, artifacts: &[(&str, Value)], empty_kinds: 
     kinds.sort_unstable();
     kinds.dedup();
     for kind in kinds {
-        tx.execute("DELETE FROM artifacts WHERE root_id=?1 AND kind=?2", params![root_id, kind])
-            .map_err(sqlite_error_path)?;
+        tx.execute(
+            "DELETE FROM artifacts WHERE root_id=?1 AND kind=?2",
+            params![root_id, kind],
+        )
+        .map_err(sqlite_error_path)?;
     }
     for (kind, value) in artifacts {
         let (stored, bodies) = split_bodies(kind, value)?;
@@ -458,7 +479,8 @@ fn replace_artifact_rows(root: &Path, artifacts: &[(&str, Value)], empty_kinds: 
         tx.execute(
             "INSERT INTO artifacts(root_id, kind, row_json) VALUES(?1, ?2, ?3)",
             params![root_id, kind, raw],
-        ).map_err(sqlite_error_path)?;
+        )
+        .map_err(sqlite_error_path)?;
         let ordinal = tx.last_insert_rowid();
         for (field, text) in bodies {
             let compressed = compression::compress_body_text(&text)?;
@@ -475,11 +497,16 @@ fn split_bodies(kind: &str, value: &Value) -> Result<(Value, Vec<(String, String
     if kind != "chunks" {
         return Ok((value.clone(), Vec::new()));
     }
-    let Some(object) = value.as_object() else { return Ok((value.clone(), Vec::new())); };
+    let Some(object) = value.as_object() else {
+        return Ok((value.clone(), Vec::new()));
+    };
     let mut stored = object.clone();
     let mut bodies = Vec::new();
     for field in BODY_FIELDS {
-        if let Some(text) = stored.remove(field).and_then(|v| v.as_str().map(str::to_owned)) {
+        if let Some(text) = stored
+            .remove(field)
+            .and_then(|v| v.as_str().map(str::to_owned))
+        {
             bodies.push((field.to_owned(), text));
         }
     }
@@ -487,9 +514,14 @@ fn split_bodies(kind: &str, value: &Value) -> Result<(Value, Vec<(String, String
 }
 
 fn restore_bodies(mut value: Value, bodies: Vec<(String, Vec<u8>, usize)>) -> Result<Value> {
-    let Some(object) = value.as_object_mut() else { return Ok(value); };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(value);
+    };
     for (field, compressed, length) in bodies {
-        object.insert(field, Value::String(compression::decompress_body_text(&compressed, length)?));
+        object.insert(
+            field,
+            Value::String(compression::decompress_body_text(&compressed, length)?),
+        );
     }
     Ok(value)
 }
@@ -497,27 +529,63 @@ fn restore_bodies(mut value: Value, bodies: Vec<(String, Vec<u8>, usize)>) -> Re
 pub fn load_artifacts(root: &Path, kind: &str) -> Result<Vec<Value>> {
     migrate_legacy(root)?;
     let connection = open_database()?;
-    let Some(root_id) = root_id(&connection, root)? else { return Ok(Vec::new()); };
-    let mut statement = connection.prepare("SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal").map_err(sqlite_error_path)?;
-    let rows = statement.query_map(params![root_id, kind], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))).map_err(sqlite_error_path)?;
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(Vec::new());
+    };
+    let mut statement = connection
+        .prepare(
+            "SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal",
+        )
+        .map_err(sqlite_error_path)?;
+    let rows = statement
+        .query_map(params![root_id, kind], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_error_path)?;
     rows.map(|row| {
         let (ordinal, raw) = row.map_err(sqlite_error_path)?;
         restore_row(&connection, ordinal, &raw)
-    }).collect()
+    })
+    .collect()
 }
 
 fn restore_row(connection: &Connection, ordinal: i64, raw: &str) -> Result<Value> {
-    let value = serde_json::from_str(raw).map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
+    let value = serde_json::from_str(raw)
+        .map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
     let mut statement = connection.prepare("SELECT field_name, body_zstd, original_len FROM artifact_bodies WHERE artifact_ordinal=?1").map_err(sqlite_error_path)?;
-    let rows = statement.query_map([ordinal], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?, row.get::<_, i64>(2)?))).map_err(sqlite_error_path)?;
-    let bodies = rows.map(|row| { let (field, bytes, length) = row.map_err(sqlite_error_path)?; Ok((field, bytes, usize::try_from(length).map_err(|_| io_error("artifact body", Error::new(ErrorKind::InvalidData, "negative body length")))?)) }).collect::<Result<Vec<_>>>()?;
+    let rows = statement
+        .query_map([ordinal], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(sqlite_error_path)?;
+    let bodies = rows
+        .map(|row| {
+            let (field, bytes, length) = row.map_err(sqlite_error_path)?;
+            Ok((
+                field,
+                bytes,
+                usize::try_from(length).map_err(|_| {
+                    io_error(
+                        "artifact body",
+                        Error::new(ErrorKind::InvalidData, "negative body length"),
+                    )
+                })?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
     restore_bodies(value, bodies)
 }
 
 pub fn load_artifact(root: &Path, kind: &str) -> Result<Option<Value>> {
     migrate_legacy(root)?;
     let connection = open_database()?;
-    let Some(root_id) = root_id(&connection, root)? else { return Ok(None); };
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(None);
+    };
     let first = connection
         .query_row(
             "SELECT ordinal, row_json FROM artifacts WHERE root_id=?1 AND kind=?2 ORDER BY ordinal LIMIT 1",
@@ -526,14 +594,18 @@ pub fn load_artifact(root: &Path, kind: &str) -> Result<Option<Value>> {
         )
         .optional()
         .map_err(sqlite_error_path)?;
-    first.map(|(ordinal, raw)| restore_row(&connection, ordinal, &raw)).transpose()
+    first
+        .map(|(ordinal, raw)| restore_row(&connection, ordinal, &raw))
+        .transpose()
 }
 
 /// Whether a root has at least one row of `kind`, without loading any row.
 pub fn has_artifacts(root: &Path, kind: &str) -> Result<bool> {
     migrate_legacy(root)?;
     let connection = open_database()?;
-    let Some(root_id) = root_id(&connection, root)? else { return Ok(false); };
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(false);
+    };
     connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM artifacts WHERE root_id=?1 AND kind=?2)",
@@ -550,28 +622,45 @@ pub fn count_artifacts_with_ext(root: &Path, kind: &str, extensions: &[&str]) ->
     }
     migrate_legacy(root)?;
     let connection = open_database()?;
-    let Some(root_id) = root_id(&connection, root)? else { return Ok(0); };
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(0);
+    };
     let placeholders = vec!["?"; extensions.len()].join(",");
     let sql = format!(
         "SELECT COUNT(*) FROM artifacts WHERE root_id=? AND kind=? AND json_extract(row_json, '$.ext') IN ({placeholders})"
     );
     let mut values: Vec<rusqlite::types::Value> = vec![root_id.into(), kind.to_owned().into()];
-    values.extend(extensions.iter().map(|ext| rusqlite::types::Value::from((*ext).to_owned())));
+    values.extend(
+        extensions
+            .iter()
+            .map(|ext| rusqlite::types::Value::from((*ext).to_owned())),
+    );
     connection
-        .query_row(&sql, rusqlite::params_from_iter(values), |row| row.get::<_, usize>(0))
+        .query_row(&sql, rusqlite::params_from_iter(values), |row| {
+            row.get::<_, usize>(0)
+        })
         .map_err(sqlite_error_path)
 }
 
 pub fn load_artifact_by_path(root: &Path, kind: &str, path: &str) -> Result<Option<Value>> {
-    Ok(load_artifacts_for_path(root, kind, path, 1)?.into_iter().next())
+    Ok(load_artifacts_for_path(root, kind, path, 1)?
+        .into_iter()
+        .next())
 }
 
 /// Rows of `kind` whose `path` equals `path`, in insertion order, at most `limit` of them.
 /// Uses the `(root_id, kind, path)` index, so it stays fast on very large roots.
-pub fn load_artifacts_for_path(root: &Path, kind: &str, path: &str, limit: usize) -> Result<Vec<Value>> {
+pub fn load_artifacts_for_path(
+    root: &Path,
+    kind: &str,
+    path: &str,
+    limit: usize,
+) -> Result<Vec<Value>> {
     migrate_legacy(root)?;
     let connection = open_database()?;
-    let Some(root_id) = root_id(&connection, root)? else { return Ok(Vec::new()); };
+    let Some(root_id) = root_id(&connection, root)? else {
+        return Ok(Vec::new());
+    };
     let mut statement = connection
         .prepare(
             "SELECT ordinal, row_json FROM artifacts
@@ -624,14 +713,20 @@ pub fn load_artifacts_matching_terms(
     if terms.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
-    let lowered = terms.iter().map(|term| term.to_lowercase()).collect::<Vec<_>>();
+    let lowered = terms
+        .iter()
+        .map(|term| term.to_lowercase())
+        .collect::<Vec<_>>();
     let mut matches = Vec::new();
     for value in load_artifacts(root, kind)? {
-        let raw = serde_json::to_string(&value).map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
+        let raw = serde_json::to_string(&value)
+            .map_err(|source| json_error(database_path().unwrap_or_default(), source))?;
         let folded = raw.to_lowercase();
         if lowered.iter().any(|term| folded.contains(term)) {
             matches.push(value);
-            if matches.len() >= limit { break; }
+            if matches.len() >= limit {
+                break;
+            }
         }
     }
     Ok(matches)
@@ -860,7 +955,9 @@ fn statistics_for_id(connection: &Connection, root_id: i64) -> Result<RootStatis
         )
         .map_err(sqlite_error_path)?;
     let rows = statement
-        .query_map([root_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?)))
+        .query_map([root_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?))
+        })
         .map_err(sqlite_error_path)?;
     let mut statistics = empty_statistics();
     for row in rows {
@@ -911,7 +1008,13 @@ fn initialize(connection: &Connection, path: &Path) -> Result<()> {
 }
 
 fn empty_statistics() -> RootStatistics {
-    RootStatistics { files: 0, folders: 0, documents: 0, chunks: 0, parse_errors: 0 }
+    RootStatistics {
+        files: 0,
+        folders: 0,
+        documents: 0,
+        chunks: 0,
+        parse_errors: 0,
+    }
 }
 
 fn remove_root_cache(root_id: i64) -> Result<()> {

@@ -119,7 +119,9 @@ pub(crate) fn route_request(
         ("GET", "/api/graph") => with_root(state, |root| graph_response(root, &request.query)),
         ("GET", "/api/brief") => with_root(state, |root| brief_response(root, &request.query)),
         ("GET", "/api/settings") => settings_response(state, &request.query, false),
-        ("POST", "/api/settings") => management_response(state, &request.query, settings_mutation_response),
+        ("POST", "/api/settings") => {
+            management_response(state, &request.query, settings_mutation_response)
+        }
         ("POST", "/api/exclude-selection") => {
             management_response(state, &request.query, exclude_selection_response)
         }
@@ -672,7 +674,8 @@ fn preview_response(state: &GuiState, query: &str) -> HttpResponse {
         } else if renderer.kind == PreviewKind::None {
             payload["reason"] = json!("archive");
             PreviewKind::None
-        } else if !renderer.kind.streams() && renderer.kind != PreviewKind::Pdf
+        } else if !renderer.kind.streams()
+            && renderer.kind != PreviewKind::Pdf
             && metadata.len() > MAX_BINARY_PREVIEW_BYTES
         {
             payload["reason"] = json!("too_large");
@@ -834,7 +837,10 @@ fn preview_file_response(state: &GuiState, request: &HttpRequest) -> HttpRespons
         Ok(metadata) => metadata.len(),
         Err(source) => return HttpResponse::json(500, json!({"error": source.to_string()})),
     };
-    if !renderer.kind.streams() && renderer.kind != PreviewKind::Pdf && size > MAX_BINARY_PREVIEW_BYTES {
+    if !renderer.kind.streams()
+        && renderer.kind != PreviewKind::Pdf
+        && size > MAX_BINARY_PREVIEW_BYTES
+    {
         return HttpResponse::json(413, json!({"error":"preview target is too large"}));
     }
     let response = HttpResponse::file_range(file, size, media_type, request.header("range"));
@@ -875,24 +881,40 @@ fn snippet_response(state: &GuiState, query: &str) -> HttpResponse {
         Err(response) => return response,
     };
     let q = query_value(query, "q").unwrap_or_default();
-    HttpResponse::json(200, preview::snippet_payload(&root, rel.trim_matches('/'), full.as_deref(), &q))
+    HttpResponse::json(
+        200,
+        preview::snippet_payload(&root, rel.trim_matches('/'), full.as_deref(), &q),
+    )
 }
 
 /// PDF bytes for page-image preview. Only real PDF files have pages; documents are shown as
 /// their parsed text instead (`kind: "document"`).
 fn preview_pdf(path: &Path) -> std::result::Result<std::sync::Arc<Vec<u8>>, HttpResponse> {
     if !path.is_file() {
-        return Err(HttpResponse::json(400, json!({"error":"preview target is not a file"})));
+        return Err(HttpResponse::json(
+            400,
+            json!({"error":"preview target is not a file"}),
+        ));
     }
     if preview_renderer(path).kind != PreviewKind::Pdf {
-        return Err(HttpResponse::json(415, json!({"error":"page preview is only for PDF files"})));
+        return Err(HttpResponse::json(
+            415,
+            json!({"error":"page preview is only for PDF files"}),
+        ));
     }
-    let size = path.metadata().map(|metadata| metadata.len()).unwrap_or(u64::MAX);
+    let size = path
+        .metadata()
+        .map(|metadata| metadata.len())
+        .unwrap_or(u64::MAX);
     if size > preview::MAX_PAGE_PREVIEW_PDF_BYTES {
-        return Err(HttpResponse::json(413, json!({"error":"preview target is too large"})));
+        return Err(HttpResponse::json(
+            413,
+            json!({"error":"preview target is too large"}),
+        ));
     }
-    preview::cached_pdf(path, || fs::read(path).map_err(|error| error.to_string()))
-        .map_err(|detail| HttpResponse::json(422, json!({"error":"preview read failed","detail":detail})))
+    preview::cached_pdf(path, || fs::read(path).map_err(|error| error.to_string())).map_err(
+        |detail| HttpResponse::json(422, json!({"error":"preview read failed","detail":detail})),
+    )
 }
 
 fn preview_pages_response(state: &GuiState, query: &str) -> HttpResponse {
@@ -907,7 +929,10 @@ fn preview_pages_response(state: &GuiState, query: &str) -> HttpResponse {
     let pages = match preview::page_count(&bytes) {
         Ok(pages) => pages,
         Err(detail) => {
-            return HttpResponse::json(422, json!({"error":"preview render failed","detail":detail}));
+            return HttpResponse::json(
+                422,
+                json!({"error":"preview render failed","detail":detail}),
+            );
         }
     };
     let base = query
@@ -930,7 +955,8 @@ fn preview_page_response(state: &GuiState, query: &str) -> HttpResponse {
         Ok(path) => path,
         Err(response) => return response,
     };
-    let Some(page) = query_value(query, "page").and_then(|value| value.parse::<usize>().ok()) else {
+    let Some(page) = query_value(query, "page").and_then(|value| value.parse::<usize>().ok())
+    else {
         return HttpResponse::json(400, json!({"error":"missing page"}));
     };
     if page == 0 || page > preview::MAX_PREVIEW_PAGES {
@@ -943,10 +969,12 @@ fn preview_page_response(state: &GuiState, query: &str) -> HttpResponse {
     match preview::render_page_png(&bytes, page) {
         Ok(Some(png)) => HttpResponse::binary(200, png, "image/png"),
         Ok(None) => HttpResponse::json(404, json!({"error":"page out of range"})),
-        Err(detail) => HttpResponse::json(422, json!({"error":"preview render failed","detail":detail})),
+        Err(detail) => HttpResponse::json(
+            422,
+            json!({"error":"preview render failed","detail":detail}),
+        ),
     }
 }
-
 
 /// Text preview of at most `MAX_TEXT_PREVIEW_BYTES`. Returns `(content, truncated)`; larger
 /// text files are cut at the limit (on a UTF-8 boundary) instead of being refused.
@@ -1354,7 +1382,8 @@ fn keep_indexed_find_candidate(
 }
 
 fn filter_candidates_to_index(fallback_root: &Path, payload: &mut serde_json::Value) {
-    let mut indexed_by_root = std::collections::HashMap::<PathBuf, std::collections::HashSet<String>>::new();
+    let mut indexed_by_root =
+        std::collections::HashMap::<PathBuf, std::collections::HashSet<String>>::new();
     let Some(candidates) = payload
         .get_mut("candidates")
         .and_then(serde_json::Value::as_array_mut)
@@ -1488,19 +1517,26 @@ fn add_candidate_snippets(root: &Path, query: &str, payload: &mut serde_json::Va
             continue;
         };
         candidate["path"] = json!(relative);
-        candidate["score"] = candidate.get("s").cloned().unwrap_or(serde_json::Value::Null);
+        candidate["score"] = candidate
+            .get("s")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let snippet_root = candidate
             .get("root")
             .and_then(serde_json::Value::as_str)
             .map(PathBuf::from)
             .unwrap_or_else(|| root.to_path_buf());
         let on_fuse_drive = snippet_root.components().any(|component| {
-            matches!(component.as_os_str().to_str(), Some("GoogleDrive" | "Google Drive"))
+            matches!(
+                component.as_os_str().to_str(),
+                Some("GoogleDrive" | "Google Drive")
+            )
         });
         let resolved = (!on_fuse_drive)
             .then(|| resolve_root_path(&snippet_root, &relative).ok())
             .flatten();
-        let snippet = preview::snippet_payload(&snippet_root, &relative, resolved.as_deref(), query);
+        let snippet =
+            preview::snippet_payload(&snippet_root, &relative, resolved.as_deref(), query);
         let text = snippet["text"].as_str().unwrap_or_default();
         candidate["preview_snippet"] = if text.is_empty() {
             serde_json::Value::Null
@@ -1666,63 +1702,178 @@ fn default_gui_settings() -> serde_json::Value {
 }
 
 fn settings_for_root(root: &Path) -> serde_json::Value {
-    load_artifact(root, GUI_SETTINGS_KIND).ok().flatten().unwrap_or_else(default_gui_settings)
+    load_artifact(root, GUI_SETTINGS_KIND)
+        .ok()
+        .flatten()
+        .unwrap_or_else(default_gui_settings)
 }
 
 fn settings_response(state: &GuiState, _query: &str, _mutating: bool) -> HttpResponse {
-    let root = match state.root() { Ok(root) => root, Err(response) => return response };
-    HttpResponse::json(200, json!({"root":root,"settings":settings_for_root(&root)}))
+    let root = match state.root() {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
+    HttpResponse::json(
+        200,
+        json!({"root":root,"settings":settings_for_root(&root)}),
+    )
 }
 
 fn settings_mutation_response(state: &GuiState, query: &str) -> HttpResponse {
-    let root = match state.root() { Ok(root) => root, Err(response) => return response };
+    let root = match state.root() {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
     let mut settings = settings_for_root(&root);
-    let algorithm = query_value(query, "algorithm").unwrap_or_else(|| settings["algorithm"].as_str().unwrap_or("basic").to_owned());
-    if !matches!(algorithm.as_str(), "basic" | "content" | "deep") { return HttpResponse::json(400, json!({"error":"algorithm must be basic, content, or deep"})); }
+    let algorithm = query_value(query, "algorithm")
+        .unwrap_or_else(|| settings["algorithm"].as_str().unwrap_or("basic").to_owned());
+    if !matches!(algorithm.as_str(), "basic" | "content" | "deep") {
+        return HttpResponse::json(
+            400,
+            json!({"error":"algorithm must be basic, content, or deep"}),
+        );
+    }
     settings["algorithm"] = json!(algorithm);
-    if query_value(query,"extensions").is_some() { settings["extensions"] = json!(parse_extensions(&query_values(query,"extensions").join(",")).into_iter().map(|e| e.trim_start_matches('.').to_owned()).collect::<Vec<_>>()); }
-    if query_value(query, "exclude").or_else(|| query_value(query, "exclusions")).is_some() { settings["exclusions"] = json!(query_values(query,"exclude").into_iter().chain(query_values(query,"exclusions")).flat_map(|v| v.split([',','\n']).map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned).collect::<Vec<_>>()).collect::<Vec<_>>()); }
-    if query_value(query, "include_hidden").is_some() { settings["include_hidden"] = json!(query_bool(query,"include_hidden")); }
-    if query_value(query, "include_sensitive").is_some() { settings["include_sensitive"] = json!(query_bool(query,"include_sensitive")); }
-    if let Some(v)=query_usize(query,"max_files") { settings["max_files"]=json!(v); }
-    if let Some(v)=query_u64(query,"max_file_bytes") { settings["max_file_bytes"]=json!(v.clamp(1,16*1024*1024*1024)); }
-    if let Some(v)=query_f64(query,"parse_timeout_seconds").or_else(|| query_f64(query,"parse_timeout")) { if !v.is_finite() || !(0.1..=300.0).contains(&v) { return HttpResponse::json(400,json!({"error":"parse_timeout_seconds must be 0.1..300"})); } settings["parse_timeout_seconds"]=json!(v); }
-    if let Some(v)=query_u64(query,"schedule_interval_seconds") { settings["schedule_interval_seconds"]=json!(if v==0 {serde_json::Value::Null} else {json!(v.clamp(1,86400))}); }
-    if let Err(error)=store_artifact(&root,GUI_SETTINGS_KIND,settings.clone()) { return HttpResponse::json(500,json!({"error":error.to_string()})); }
-    HttpResponse::json(200,json!({"root":root,"settings":settings,"applied":true}))
+    if query_value(query, "extensions").is_some() {
+        settings["extensions"] = json!(
+            parse_extensions(&query_values(query, "extensions").join(","))
+                .into_iter()
+                .map(|e| e.trim_start_matches('.').to_owned())
+                .collect::<Vec<_>>()
+        );
+    }
+    if query_value(query, "exclude")
+        .or_else(|| query_value(query, "exclusions"))
+        .is_some()
+    {
+        settings["exclusions"] = json!(
+            query_values(query, "exclude")
+                .into_iter()
+                .chain(query_values(query, "exclusions"))
+                .flat_map(|v| v
+                    .split([',', '\n'])
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        );
+    }
+    if query_value(query, "include_hidden").is_some() {
+        settings["include_hidden"] = json!(query_bool(query, "include_hidden"));
+    }
+    if query_value(query, "include_sensitive").is_some() {
+        settings["include_sensitive"] = json!(query_bool(query, "include_sensitive"));
+    }
+    if let Some(v) = query_usize(query, "max_files") {
+        settings["max_files"] = json!(v);
+    }
+    if let Some(v) = query_u64(query, "max_file_bytes") {
+        settings["max_file_bytes"] = json!(v.clamp(1, 16 * 1024 * 1024 * 1024));
+    }
+    if let Some(v) =
+        query_f64(query, "parse_timeout_seconds").or_else(|| query_f64(query, "parse_timeout"))
+    {
+        if !v.is_finite() || !(0.1..=300.0).contains(&v) {
+            return HttpResponse::json(
+                400,
+                json!({"error":"parse_timeout_seconds must be 0.1..300"}),
+            );
+        }
+        settings["parse_timeout_seconds"] = json!(v);
+    }
+    if let Some(v) = query_u64(query, "schedule_interval_seconds") {
+        settings["schedule_interval_seconds"] = json!(if v == 0 {
+            serde_json::Value::Null
+        } else {
+            json!(v.clamp(1, 86400))
+        });
+    }
+    if let Err(error) = store_artifact(&root, GUI_SETTINGS_KIND, settings.clone()) {
+        return HttpResponse::json(500, json!({"error":error.to_string()}));
+    }
+    HttpResponse::json(200, json!({"root":root,"settings":settings,"applied":true}))
 }
 
 fn exclude_selection_response(state: &GuiState, query: &str) -> HttpResponse {
-    let root = match state.root() { Ok(root) => root, Err(response) => return response };
-    let mut settings=settings_for_root(&root);
-    let mut exclusions=settings["exclusions"].as_array().cloned().unwrap_or_default();
-    let excluded=query_bool(query,"excluded");
-    let mut changed=Vec::new();
-    for raw in query_values(query,"path") { let rel=raw.trim_matches('/'); if rel.is_empty() || rel.contains("..") { return HttpResponse::json(400,json!({"error":"invalid relative path"})); } let value=json!(rel); if excluded { if !exclusions.iter().any(|v|v==&value) { exclusions.push(value); changed.push(rel.to_owned()); } } else if let Some(i)=exclusions.iter().position(|v|v==&value) { exclusions.remove(i); changed.push(rel.to_owned()); } }
-    settings["exclusions"]=json!(exclusions); if let Err(error)=store_artifact(&root,GUI_SETTINGS_KIND,settings.clone()) { return HttpResponse::json(500,json!({"error":error.to_string()})); }
-    HttpResponse::json(200,json!({"root":root,"exclusions":settings["exclusions"],"changed":changed}))
+    let root = match state.root() {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
+    let mut settings = settings_for_root(&root);
+    let mut exclusions = settings["exclusions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let excluded = query_bool(query, "excluded");
+    let mut changed = Vec::new();
+    for raw in query_values(query, "path") {
+        let rel = raw.trim_matches('/');
+        if rel.is_empty() || rel.contains("..") {
+            return HttpResponse::json(400, json!({"error":"invalid relative path"}));
+        }
+        let value = json!(rel);
+        if excluded {
+            if !exclusions.iter().any(|v| v == &value) {
+                exclusions.push(value);
+                changed.push(rel.to_owned());
+            }
+        } else if let Some(i) = exclusions.iter().position(|v| v == &value) {
+            exclusions.remove(i);
+            changed.push(rel.to_owned());
+        }
+    }
+    settings["exclusions"] = json!(exclusions);
+    if let Err(error) = store_artifact(&root, GUI_SETTINGS_KIND, settings.clone()) {
+        return HttpResponse::json(500, json!({"error":error.to_string()}));
+    }
+    HttpResponse::json(
+        200,
+        json!({"root":root,"exclusions":settings["exclusions"],"changed":changed}),
+    )
 }
 
 fn prepare_options_from_settings(settings: &serde_json::Value) -> PrepareOptions {
     PrepareOptions {
         include_hidden: settings["include_hidden"].as_bool().unwrap_or(false),
         include_sensitive: settings["include_sensitive"].as_bool().unwrap_or(false),
-        max_files: settings["max_files"].as_u64().and_then(|v| usize::try_from(v).ok()),
-        extensions: settings["extensions"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)).collect(),
+        max_files: settings["max_files"]
+            .as_u64()
+            .and_then(|v| usize::try_from(v).ok()),
+        extensions: settings["extensions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect(),
         max_file_bytes: settings["max_file_bytes"].as_u64(),
-        max_hash_bytes: settings["max_hash_bytes"].as_u64().unwrap_or(512 * 1024 * 1024),
+        max_hash_bytes: settings["max_hash_bytes"]
+            .as_u64()
+            .unwrap_or(512 * 1024 * 1024),
         parse_timeout_seconds: settings["parse_timeout_seconds"].as_f64().unwrap_or(5.0),
-        exclude_patterns: settings["exclusions"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)).collect(),
+        exclude_patterns: settings["exclusions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect(),
         deep_archive_index: settings["algorithm"].as_str() == Some("deep"),
         ..PrepareOptions::default()
     }
 }
 
-
 fn refresh_response(state: &GuiState, query: &str) -> HttpResponse {
-    let root = match state.root() { Ok(root) => root, Err(response) => return response };
+    let root = match state.root() {
+        Ok(root) => root,
+        Err(response) => return response,
+    };
     let settings = settings_for_root(&root);
-    prepare_operation_response(state, query, prepare_options_from_settings(&settings), settings["algorithm"].as_str()==Some("deep"))
+    prepare_operation_response(
+        state,
+        query,
+        prepare_options_from_settings(&settings),
+        settings["algorithm"].as_str() == Some("deep"),
+    )
 }
 
 fn reindex_response(state: &GuiState, query: &str) -> HttpResponse {
@@ -1995,7 +2146,10 @@ fn reindex_folder_response(state: &GuiState, query: &str) -> HttpResponse {
             Ok(v) => v,
             Err(r) => return r,
         };
-        match prepare(root, &prepare_options_from_settings(&settings_for_root(root))) {
+        match prepare(
+            root,
+            &prepare_options_from_settings(&settings_for_root(root)),
+        ) {
             Ok(result) => HttpResponse::json(
                 200,
                 json!({"root":root,"path":rel,"action":"reindex","state":"completed","files":result.files,"documents":result.docs_parsed,"statistics":root_statistics(root).ok()}),
@@ -2069,7 +2223,11 @@ fn root_switch_response(state: &GuiState, query: &str) -> HttpResponse {
         Err(response) => return response,
     };
     let result = if query_bool(query, "prepare") {
-        prepare(&root, &prepare_options_from_settings(&settings_for_root(&root))).map(|_| ())
+        prepare(
+            &root,
+            &prepare_options_from_settings(&settings_for_root(&root)),
+        )
+        .map(|_| ())
     } else {
         migrate_legacy(&root).and_then(|_| register_root(&root).map(|_| ()))
     };
@@ -2214,10 +2372,10 @@ mod tests {
 #[cfg(test)]
 mod find_filter_tests {
     use super::{
-        append_find_option_flags, apply_first_result, candidate_matches_extensions,
+        PreviewKind, append_find_option_flags, apply_first_result, candidate_matches_extensions,
         candidate_rel_path, keep_indexed_find_candidate, keep_listed_root, parse_exclude_patterns,
         parse_extensions, paths_look_like_same_root, paths_refer_to_same_root,
-        percent_encode_query, prepare_options_from_query, preview_renderer, PreviewKind,
+        percent_encode_query, prepare_options_from_query, preview_renderer,
     };
     use std::collections::HashMap;
 
@@ -2226,7 +2384,12 @@ mod find_filter_tests {
     #[test]
     fn unicode_preview_snippet_preserves_late_korean_match() {
         for prefix in ["Ω", "İ", "K", "ΩİK😀"] {
-            let content = format!("{}{} 계약서 본문{}", prefix.repeat(100), "도입 ".repeat(100), " 후문".repeat(100));
+            let content = format!(
+                "{}{} 계약서 본문{}",
+                prefix.repeat(100),
+                "도입 ".repeat(100),
+                " 후문".repeat(100)
+            );
             for query in ["계약서", "absent 계약서"] {
                 let snippet = super::preview_snippet(&content, query);
                 assert!(snippet.contains("계약서 본문"), "{prefix}: {snippet}");

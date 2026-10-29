@@ -24,7 +24,7 @@ fn default_prepare_indexes_media_filename_without_root_sidecar() {
         &data_dir,
         &["find", root_str(&root).as_str(), "photo.png", "--json"],
     );
-    assert_eq!(found["paths"][0], "photo.png");
+    assert_eq!(found["paths"][0], "photo.png", "{found}");
     assert!(data_dir.join("jikji/index.sqlite").is_file());
 }
 

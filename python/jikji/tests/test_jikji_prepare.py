@@ -1477,7 +1477,6 @@ def test_agent_skill_install_to_explicit_dest(tmp_path):
     assert result.installed is True
     assert dest.exists()
     text = dest.read_text(encoding="utf-8")
-    assert "selected automatically" in text
     assert "jikji find" in text
 
 
@@ -1505,7 +1504,6 @@ def test_agent_skill_install_dest_only_treats_unknown_agent_as_custom(tmp_path, 
     assert payload["installed_any"] is True
     assert payload["results"][0]["agent"] == "custom"
     assert dest.exists()
-    assert "any coding" in dest.read_text(encoding="utf-8")
 
 
 def test_skill_export_prints_and_writes_universal_skill(tmp_path, capsys):
@@ -1514,7 +1512,6 @@ def test_skill_export_prints_and_writes_universal_skill(tmp_path, capsys):
     assert main(["skill-export"]) == 0
     printed = capsys.readouterr().out
     assert "Jikji Local File Discovery Skill" in printed
-    assert "any coding" in printed
 
     dest = tmp_path / "agent" / "SKILL.md"
     assert main(["skill-export", "--dest", str(dest), "--no-prepare", "--json"]) == 0

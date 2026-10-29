@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use jikji_core::{JikjiError, PrepareOptions};
 use jikji_index::prepare;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::args::PostInstallPrepareArgs;
 use crate::output::print_json;
@@ -173,12 +173,13 @@ fn select_default_roots_from(home: &Path) -> (Vec<PathBuf>, Value) {
 }
 
 pub(crate) fn post_install_home() -> PathBuf {
-    std::env::var_os("JIKJI_POST_INSTALL_HOME")
+    let home = std::env::var_os("JIKJI_POST_INSTALL_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("JIKJI_AGENT_HOME").map(PathBuf::from))
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
         .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."))
+        .unwrap_or_else(|| PathBuf::from("."));
+    home.canonicalize().unwrap_or(home)
 }
 
 fn common_roots(home: &Path) -> Vec<PathBuf> {
@@ -450,8 +451,12 @@ mod tests {
             !roots.iter().any(|root| root.ends_with(".hidden")),
             "hidden cloud children must not become library roots: {roots:?}"
         );
-        let marker = home.join("GoogleDrive").join("마커");
-        let parent = home.join("GoogleDrive");
+        let marker = home
+            .join("GoogleDrive")
+            .join("마커")
+            .canonicalize()
+            .expect("marker");
+        let parent = home.join("GoogleDrive").canonicalize().expect("parent");
         let excludes = child_dir_excludes(&parent, &roots);
         assert!(
             excludes.iter().any(|name| name == "마커"),
