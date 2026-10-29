@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Native Hermes benchmark runner for Jikji."
-publish = false
 
 [dependencies]
 jikji-search.workspace = true

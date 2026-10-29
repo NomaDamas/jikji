@@ -51,7 +51,7 @@ jobs:
         run: cargo test --workspace --all-features
 
       - name: Package verification
-        run: cargo package --workspace --exclude jikji-parity --exclude jikji-bench
+        run: cargo package --workspace --exclude jikji-parity
 
       - name: Plan crates to publish
         id: plan
@@ -67,6 +67,9 @@ jobs:
             jikji-search
             jikji-agent
             jikji-index
+            jikji-public-datasets
+            jikji-bench
+            jikji-hermes-bench
             jikji-cli
           )
 

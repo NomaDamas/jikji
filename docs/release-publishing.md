@@ -55,15 +55,16 @@ trusted publisher entry for this repository:
 - workflow file: `publish.yml`
 - environment: `crates-io`
 - crate list: `jikji-core`, `jikji-media-bridge`, `jikji-parser`,
-  `jikji-search`, `jikji-agent`, `jikji-index`, `jikji-cli`
+  `jikji-search`, `jikji-agent`, `jikji-index`, `jikji-public-datasets`,
+  `jikji-bench`, `jikji-hermes-bench`, `jikji-cli`
 
-The internal `jikji-parity` and `jikji-bench` crates have `publish = false` and
-are intentionally excluded. Benchmark parity is driven by Python evaluator
-scripts under `tools/parity/`, not by a published Rust benchmark crate.
+`jikji-cli` depends on `jikji-public-datasets`, `jikji-bench`, and
+`jikji-hermes-bench`, so all three must be published before it. Only the
+internal `jikji-parity` test crate has `publish = false` and is excluded.
 
 ## Local Publish Dry Runs Before First Release
 
-`cargo package --workspace --exclude jikji-parity --exclude jikji-bench` is the
+`cargo package --workspace --exclude jikji-parity` is the
 local package-shape gate and should pass before release. For publish dry-runs before the first
 crates.io release, only the first dependency crate can be fully proven against
 the live registry:

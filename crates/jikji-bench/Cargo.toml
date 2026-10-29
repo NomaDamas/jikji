@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Evaluation and benchmark helper scaffolding for Jikji."
-publish = false
 
 [dependencies]
 jikji-core.workspace = true
