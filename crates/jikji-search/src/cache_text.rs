@@ -7,10 +7,13 @@ pub(crate) fn generated_cache_path(storage_dir: &Path, cache_path: &str) -> Opti
     }
     let rel = cache_path.strip_prefix(".jikji/").unwrap_or(cache_path);
     let rel_path = Path::new(rel);
-    if rel_path.is_absolute()
-        || rel_path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir))
+    if rel_path.has_root()
+        || rel_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
     {
         return None;
     }
