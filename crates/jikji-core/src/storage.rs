@@ -1058,7 +1058,7 @@ fn sqlite_error_path(source: rusqlite::Error) -> crate::JikjiError {
 
 #[cfg(test)]
 mod cloud_drive_tests {
-    use super::{cloud_drive_path_blocked, path_looks_like_cloud_drive};
+    use super::path_looks_like_cloud_drive;
     use std::path::Path;
 
     #[test]
@@ -1085,6 +1085,8 @@ mod cloud_drive_tests {
     #[cfg(unix)]
     #[test]
     fn cloud_drive_path_blocked_follows_one_parent_symlink() {
+        use super::cloud_drive_path_blocked;
+
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system time")
