@@ -271,7 +271,7 @@ fn media_bridge_meta(outcome: &MediaBridgeOutcome) -> Value {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{CacheDirs, document_rows};
     use crate::scan::scan_root;
@@ -279,7 +279,6 @@ mod tests {
     use std::fs;
     use std::time::{Duration, Instant};
 
-    #[cfg(unix)]
     #[test]
     fn document_hash_timeout_skips_blocked_file_and_keeps_others() {
         let dir = tempfile::tempdir().expect("tempdir");
