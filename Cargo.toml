@@ -15,7 +15,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -31,15 +31,15 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 zstd = "0.13"
 thiserror = "2.0.17"
 tempfile = "3"
-jikji-agent = { path = "crates/jikji-agent", version = "0.2.0" }
-jikji-core = { path = "crates/jikji-core", version = "0.2.0" }
-jikji-bench = { path = "crates/jikji-bench", version = "0.2.0" }
-jikji-hermes-bench = { path = "crates/jikji-hermes-bench", version = "0.2.0" }
-jikji-index = { path = "crates/jikji-index", version = "0.2.0" }
-jikji-media-bridge = { path = "crates/jikji-media-bridge", version = "0.2.0" }
-jikji-parser = { path = "crates/jikji-parser", version = "0.2.0" }
-jikji-public-datasets = { path = "crates/jikji-public-datasets", version = "0.2.0" }
-jikji-search = { path = "crates/jikji-search", version = "0.2.0" }
+jikji-agent = { path = "crates/jikji-agent", version = "0.2.1" }
+jikji-core = { path = "crates/jikji-core", version = "0.2.1" }
+jikji-bench = { path = "crates/jikji-bench", version = "0.2.1" }
+jikji-hermes-bench = { path = "crates/jikji-hermes-bench", version = "0.2.1" }
+jikji-index = { path = "crates/jikji-index", version = "0.2.1" }
+jikji-media-bridge = { path = "crates/jikji-media-bridge", version = "0.2.1" }
+jikji-parser = { path = "crates/jikji-parser", version = "0.2.1" }
+jikji-public-datasets = { path = "crates/jikji-public-datasets", version = "0.2.1" }
+jikji-search = { path = "crates/jikji-search", version = "0.2.1" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
