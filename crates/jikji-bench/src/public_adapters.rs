@@ -490,6 +490,8 @@ fn invalid(message: impl Into<String>) -> jikji_core::JikjiError {
 mod tests {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
 
     use jikji_public_datasets::HttpFetcher;
@@ -634,7 +636,8 @@ mod tests {
 
     struct FixtureServer {
         base_url: String,
-        _thread: thread::JoinHandle<()>,
+        stop: Arc<AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
     }
 
     impl FixtureServer {
@@ -642,22 +645,18 @@ mod tests {
             let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
             let address = listener.local_addr().expect("address");
             listener.set_nonblocking(true).expect("nonblocking");
+            let stop = Arc::new(AtomicBool::new(false));
+            let thread_stop = Arc::clone(&stop);
             let handle = thread::spawn(move || {
-                let idle_limit = std::time::Duration::from_millis(250);
-                let mut idle_since = std::time::Instant::now();
-                loop {
+                while !thread_stop.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
-                            idle_since = std::time::Instant::now();
                             stream.set_nonblocking(false).expect("blocking stream");
                             let path = request_path(&mut stream);
                             let bytes = handler(&path);
                             stream.write_all(&bytes).expect("respond");
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            if idle_since.elapsed() >= idle_limit {
-                                break;
-                            }
                             thread::sleep(std::time::Duration::from_millis(5));
                         }
                         Err(_) => break,
@@ -666,7 +665,17 @@ mod tests {
             });
             Self {
                 base_url: format!("http://{address}"),
-                _thread: handle,
+                stop,
+                thread: Some(handle),
+            }
+        }
+    }
+
+    impl Drop for FixtureServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
             }
         }
     }
