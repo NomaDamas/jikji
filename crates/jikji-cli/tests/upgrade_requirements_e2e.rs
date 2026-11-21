@@ -256,6 +256,68 @@ fn empty_results_reindex_once_and_retry_same_query() {
     }
 }
 
+#[test]
+fn search_triggered_refresh_never_writes_into_the_root() {
+    let fixture = Fixture::new();
+    fs::write(fixture.root.join("a.txt"), "needle alpha").unwrap();
+    let prepared = fixture.json(
+        [
+            "prepare",
+            fixture.root_str().as_str(),
+            "--no-agent-rules",
+            "--no-root-map",
+            "--json",
+        ],
+        &[],
+    );
+    let listing = |root: &Path| {
+        let mut names = fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    assert_eq!(
+        listing(&fixture.root),
+        ["a.txt"],
+        "--no-root-map keeps ROOT untouched"
+    );
+
+    fs::write(fixture.root.join("b.txt"), "needle changed").unwrap();
+    let found = fixture.json(
+        ["find", fixture.root_str().as_str(), "needle", "--json"],
+        &[],
+    );
+    assert_eq!(found["background_refresh_started"], true);
+    // Wait until the background prepare has finished (both locks released), then check ROOT.
+    let index_dir = PathBuf::from(prepared["index_dir"].as_str().expect("index_dir"));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while index_dir.join(".lock").exists() || index_dir.join(".refresh.lock").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "background refresh did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let refreshed = fixture.json(
+        [
+            "find",
+            fixture.root_str().as_str(),
+            "changed",
+            "--no-background-refresh",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(refreshed["paths"][0], "b.txt", "{refreshed}");
+    assert_eq!(
+        listing(&fixture.root),
+        ["a.txt", "b.txt"],
+        "a search-triggered refresh must not add AGENTS.md, CLAUDE.md, .cursorrules or the map to ROOT"
+    );
+}
+
 fn candidate_evidence(value: &Value) -> String {
     value["candidates"]
         .as_array()

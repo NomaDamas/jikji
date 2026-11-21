@@ -1,6 +1,6 @@
 ---
 name: jikji
-description: Use Jikji first only for bounded local file/folder discovery with an unknown target path or a corpus-content search; explicit Jikji administration is also supported.
+description: Find local files, folders and documents by name, location, metadata or by what is written inside them (PDF, HWP, Office, text, code), and answer "which file mentions X" questions. Run `jikji find` BEFORE grep, find, glob or ls whenever the path is unknown and a folder must be searched. 파일·폴더·문서 찾기, 문서 내용 검색. Not for regular expressions, code symbols or line numbers (use grep), known-path reads, or general questions. Explicit Jikji administration is also supported.
 ---
 
 # Jikji Local File Discovery Skill
@@ -73,6 +73,59 @@ Interpret the JSON contract within this discovery request only:
   the fallback command ceiling. `raw_fallback_allowed=false` prohibits raw
   discovery fallback, not subsequent reading, editing, or testing.
 - If `agent_should_not_rerank` is true, preserve Jikji's order.
+
+## Reading Results From Any Folder
+
+`jikji find` accepts any folder, not only the folder that was indexed:
+
+- A sub-folder of an indexed root is answered from that root's index, limited to the
+  sub-folder. `scope` and `index_root` name what was searched, and `paths[]` are relative to
+  the folder you asked about. Nothing is indexed or written for this.
+- Read `notes[]` (each has `code` and `message`) before trusting an empty or short result:
+  `freshness_not_checked` means files edited since indexing may be missing, so read recently
+  edited files directly; `pattern_syntax_not_supported` means Jikji ranks files by words and
+  does not evaluate regular expressions, exact code symbols or punctuation, and returns
+  files, not line numbers; use the returned files to narrow, then grep inside them.
+- An empty result carries `empty_reason`: `no_match_in_index` (searched
+  `indexed_files_searched` files, try fewer or different words), `scope_has_no_indexed_files`,
+  or `path_not_found`.
+- `index_status=missing` carries `reason` and `next_steps[]`. `not_indexed` means no index
+  covers the folder; `indexed_roots_inside[]` lists indexed folders below it that can be
+  searched instead. `find` never indexes by itself: ask the user before running
+  `jikji prepare`.
+- `jikji_version` is in every result. If `jikji --version` differs from the build that
+  produced the skill or the index, say so instead of guessing; a stale installed binary
+  lacks the behaviour above.
+
+## Request Types And Result Fields
+
+Before trusting a hit, read `request_plan.intent` and the matching `results[]` entry
+(`file_kind`, `text_indexed`, `matched_in`, `snippet`). Jikji matches the words of a request
+against file names, folders and the text of indexed files; the plan says what that meant here.
+
+- `files_by_name_or_text` (default): documents and plain text are searched by file name, folder
+  and indexed text together. `results[].snippet` is the passage around the match (up to the first
+  20 results): quote it instead of opening the file when it answers the question. A `null`
+  snippet means the file matched by name or path only. `results[].matched_words` lists which of
+  `request_plan.query_words` the file contains (in its path or text); with several words, a word
+  missing from the top result is either filler of your request or not in the file you want, so
+  check it before trusting that result.
+- `code_identifier`: a `snake_case`/`camelCase` word that hit source files. Jikji returns the
+  files, not lines and not definition vs use (note `identifier_files_only`): run `grep -n` for the
+  identifier inside the returned files to get the lines.
+- `exact_text`: a regular expression, code syntax or a line position (note
+  `pattern_syntax_not_supported`). Jikji cannot answer it exactly. Follow
+  `request_plan.use_instead`: `tool=grep` gives a ready `command` and `narrow_to` files to grep
+  first; `tool=read` means open the named file at that line. Do not retry Jikji with other words.
+- `non_text_files`: images, audio and video are found by file name, folder and extension only
+  (`file_kind=image|audio|video`, `text_indexed=false`, `matched_in=["name_path"]`, note
+  `non_text_name_match_only`). Never claim such a file's content matches the query. An empty
+  result for a question about what a picture shows or a recording says carries
+  `non_text_content_not_searchable` and `coverage` (files by kind and how many have indexed text):
+  search by the file's name, folder or date instead, or ask the user before running
+  `jikji deep-index` (OCR/transcription) on the folder.
+- `request_plan.not_searched` lists what this request could not look at; `coverage` (on empty
+  results) shows what the index can search by text at all.
 
 ## Stop Rule: Stop Discovery, Not The Task
 

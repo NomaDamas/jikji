@@ -60,6 +60,16 @@ directory. That is the expected fast-start path; it is separate from `find`.
 - `handoff_action=raw_fallback_after_retry`: raw search is allowed only after the
   retry failed, stayed empty, or stayed clearly wrong.
 - `agent_should_not_rerank=true`: preserve Jikji order.
+- `request_plan.intent`: `files_by_name_or_text`, `code_identifier`, `exact_text`,
+  `non_text_files` or `empty_query`; `request_plan.use_instead` (grep or file read) accompanies
+  `exact_text`; `request_plan.not_searched` lists what the request could not look at.
+- `results[]`: per returned path, `file_kind`, `text_indexed`, `matched_in`
+  (`name_path`/`text`), `matched_words` (which of `request_plan.query_words` the file contains)
+  and `snippet` (the passage around the match, first 20 results).
+- `notes[]` codes: `pattern_syntax_not_supported`, `identifier_files_only`,
+  `non_text_name_match_only`, `non_text_content_not_searchable`, `freshness_not_checked`,
+  `searched_enclosing_index`, `no_match_in_index`, `scope_has_no_indexed_files`,
+  `path_not_found`, `empty_query`. `coverage` (empty results) counts indexed files by kind.
 
 ## Do Not Crawl First
 

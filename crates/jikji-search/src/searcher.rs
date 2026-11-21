@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use jikji_core::Result;
@@ -75,6 +76,16 @@ pub struct SearchCandidate {
 }
 
 pub fn search(root: &Path, query: &str, options: SearchOptions) -> Result<Vec<SearchCandidate>> {
+    search_in_scope(root, query, options, None)
+}
+
+/// Like [`search`], optionally keeping only files below `scope` (a folder relative to `root`).
+pub fn search_in_scope(
+    root: &Path,
+    query: &str,
+    options: SearchOptions,
+    scope: Option<&str>,
+) -> Result<Vec<SearchCandidate>> {
     migrate_legacy(root)?;
     let index_path = database_path()?;
     let con = open_database()?;
@@ -95,8 +106,15 @@ pub fn search(root: &Path, query: &str, options: SearchOptions) -> Result<Vec<Se
     let mut reasons = TermMap::new();
     score_filename_hits(&con, &query_terms, &mut scores, &mut matched, &mut reasons)?;
     score_field_hits(&con, &query_terms, &mut scores, &mut matched, &mut reasons)?;
+    let scope_pattern = scope
+        .filter(|scope| !scope.trim_matches('/').is_empty())
+        .map(crate::scope::like_pattern);
+    if let Some(pattern) = &scope_pattern {
+        let allowed = scope_doc_ids(&con, pattern)?;
+        scores.retain(|doc_id, _| allowed.contains(doc_id));
+    }
     let mut candidates = if scores.is_empty() {
-        fallback_scan_docs(&con, query)?
+        fallback_scan_docs(&con, query, scope_pattern.as_deref())?
     } else {
         candidates_from_scores(&con, query, scores, matched, reasons, options.top_k)?
     };
@@ -171,7 +189,8 @@ fn candidates_from_scores(
             .total_cmp(&left.1)
             .then_with(|| left.0.cmp(&right.0))
     });
-    let load_limit = top_k.saturating_mul(2).clamp(top_k.max(1), 200);
+    // Load twice the wanted candidates (at least `top_k`, at most 200 unless `top_k` is larger).
+    let load_limit = top_k.saturating_mul(2).clamp(top_k.max(1), 200.max(top_k));
     ranked.truncate(load_limit);
     let mut out = Vec::with_capacity(ranked.len());
     for (doc_id, base_score) in ranked {
@@ -229,13 +248,34 @@ fn load_doc(con: &Connection, doc_id: i64) -> Result<DocRecord> {
     .map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))
 }
 
-fn fallback_scan_docs(con: &Connection, query: &str) -> Result<Vec<SearchCandidate>> {
-    let query_tokens = tokens(query, 32);
+fn scope_doc_ids(con: &Connection, pattern: &str) -> Result<HashSet<i64>> {
     let mut stmt = con
-        .prepare("SELECT path,name,duplicate_group_id,row_json,body_blob,body_size FROM docs")
+        .prepare("SELECT id FROM docs WHERE path LIKE ?1 ESCAPE '\\'")
         .map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(params![pattern], |row| row.get::<_, i64>(0))
+        .map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))?;
+    let mut ids = HashSet::new();
+    for row in rows {
+        ids.insert(row.map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))?);
+    }
+    Ok(ids)
+}
+
+fn fallback_scan_docs(
+    con: &Connection,
+    query: &str,
+    scope_pattern: Option<&str>,
+) -> Result<Vec<SearchCandidate>> {
+    let query_tokens = tokens(query, 32);
+    let mut stmt = con
+        .prepare(
+            "SELECT path,name,duplicate_group_id,row_json,body_blob,body_size FROM docs \
+             WHERE ?1 IS NULL OR path LIKE ?1 ESCAPE '\\'",
+        )
+        .map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))?;
+    let rows = stmt
+        .query_map(params![scope_pattern], |row| {
             let mut value =
                 serde_json::from_str::<Value>(&row.get::<_, String>(3)?).unwrap_or(Value::Null);
             restore_body(&mut value, row.get(4)?, row.get(5)?)

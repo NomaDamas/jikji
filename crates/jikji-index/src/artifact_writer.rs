@@ -89,20 +89,22 @@ pub(crate) fn write_static_artifacts(
         index_dir.join("autorag_manifest.json"),
         &json!({"schema_version": 1}),
     )?;
-    write_markdown_files(scan, &manifest)
+    write_markdown_files(scan, &manifest, options.skip_root_map)
 }
 
 const DISCOVERY_SCOPE: &str = "Apply Jikji only when ALL conditions hold: local file/folder/document discovery intent, an unknown target path or corpus content search, and an explicit or inferred bounded root. Exclude general QA, explanations, coding advice, web search, known-path reads or edits, stat/process/git/build/test/package commands, directory listings, and LSP symbols. Root existence or words file/search alone are not triggers. In mixed tasks only the discovery substep is routed. Retry, fallback, and stop rules apply only to discovery, not later reading, editing, or testing. Explicit Jikji administration requests are separate.";
 const LLM_WIKI_SCHEMA: &str = "# Jikji LLM Wiki Schema\n\nAll paths are relative to this index directory.\n\n- `wiki/index.md`: wiki entry point.\n- `knowledge_graph.json`: corpus/source/folder/term graph.\n- `graph_routes.jsonl`: one low-token route row per source.\n";
 
-fn write_markdown_files(scan: &ScanResult, manifest: &Value) -> Result<()> {
+fn write_markdown_files(scan: &ScanResult, manifest: &Value, skip_root_map: bool) -> Result<()> {
     let index_dir = root_storage_dir(&scan.root)?;
     let map = agent_map(scan, manifest);
     replace_artifacts(&scan.root, &[("agent_map", json!({"markdown": map}))])?;
     fs::write(index_dir.join("agent_map.md"), &map)
         .map_err(|source| io_error(index_dir.join("agent_map.md"), source))?;
-    fs::write(scan.root.join(ROOT_AGENT_MAP), &map)
-        .map_err(|source| io_error(scan.root.join(ROOT_AGENT_MAP), source))?;
+    if !skip_root_map {
+        fs::write(scan.root.join(ROOT_AGENT_MAP), &map)
+            .map_err(|source| io_error(scan.root.join(ROOT_AGENT_MAP), source))?;
+    }
     fs::write(
         index_dir.join("agent_routes.md"),
         format!("# Jikji Agent Routes\n\n{DISCOVERY_SCOPE}\nFor in-scope discovery, use `jikji find ROOT QUERY --json` first and follow handoff_action.\n"),

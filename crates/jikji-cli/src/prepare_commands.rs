@@ -74,6 +74,7 @@ pub(crate) fn prepare_options_from_args(args: &PrepareArgs) -> PrepareOptions {
         archive_max_entry_bytes: args.archive_max_entry_bytes,
         archive_max_total_bytes: args.archive_max_total_bytes,
         clean_reindex: args.clean_reindex,
+        skip_root_map: args.no_root_map,
     }
 }
 

@@ -24,6 +24,8 @@ mod output;
 mod post_install_background;
 mod post_install_commands;
 mod prepare_commands;
+mod query_shape;
+mod request_plan;
 mod search_commands;
 mod search_graph;
 mod search_prepare_options;

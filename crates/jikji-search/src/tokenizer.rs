@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::Path;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::stopwords::STOP_TERMS;
 
@@ -33,7 +34,9 @@ const KOREAN_PARTICLE_SUFFIXES: &[&str] = &[
 pub(crate) fn tokens(text: &str, limit: usize) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = BTreeSet::new();
-    let chars = text.chars().collect::<Vec<_>>();
+    // File names synced from macOS arrive in NFD, where each Hangul syllable is split into jamo
+    // that are not word characters; compose first so both spellings produce the same terms.
+    let chars = text.nfc().collect::<Vec<_>>();
     let mut start = None;
     for (idx, ch) in chars.iter().enumerate() {
         if is_token_continue(*ch) {
@@ -158,7 +161,7 @@ pub(crate) fn quoted_terms(query: &str) -> Vec<String> {
 }
 
 pub(crate) fn compact_lookup_text(text: &str) -> String {
-    text.chars()
+    text.nfc()
         .filter(|ch| ch.is_ascii_alphanumeric() || is_cjk(*ch))
         .flat_map(char::to_lowercase)
         .collect()
@@ -247,7 +250,8 @@ pub(crate) fn is_cjk(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::query_terms;
+    use super::{filename_lookup_keys, query_terms};
+    use unicode_normalization::UnicodeNormalization;
 
     #[test]
     fn query_terms_keeps_document_extensions() {
@@ -265,6 +269,18 @@ mod tests {
         assert!(
             terms.contains("범정부") || terms.iter().any(|term| term.contains("범정")),
             "{terms:?}"
+        );
+    }
+
+    #[test]
+    fn decomposed_hangul_yields_the_same_terms_as_composed() {
+        let composed = "계약서 초안";
+        let decomposed: String = composed.nfd().collect();
+        assert_ne!(composed, decomposed);
+        assert_eq!(query_terms(composed), query_terms(&decomposed));
+        assert_eq!(
+            filename_lookup_keys(composed),
+            filename_lookup_keys(&decomposed)
         );
     }
 

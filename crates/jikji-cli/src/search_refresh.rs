@@ -88,6 +88,9 @@ fn spawn_background_prepare(
         .arg("--doc-text-chunk-chars")
         .arg(options.doc_text_chunk_chars.to_string())
         .arg("--json")
+        // A refresh triggered by a search must not edit files under ROOT.
+        .arg("--no-agent-rules")
+        .arg("--no-root-map")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

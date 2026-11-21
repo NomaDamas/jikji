@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -13,7 +13,7 @@ use crate::discover_contract::{
 use crate::discover_query::{
     anchor_tokens, classify_query, retry_proof_for, strategy_variants, strip_shell_noise,
 };
-use crate::searcher::{SearchCandidate, SearchOptions, search};
+use crate::searcher::{SearchCandidate, SearchOptions, search_in_scope};
 use jikji_core::Result;
 use serde_json::{Value, json};
 
@@ -23,6 +23,10 @@ pub struct DiscoverOptions {
     pub retry_exhausted: bool,
     pub retry_proof: String,
     pub lite: bool,
+    /// Registered root whose index answers the search when it is not the requested folder itself.
+    pub index_root: Option<PathBuf>,
+    /// Requested folder relative to `index_root`; results are kept to it and reported relative to it.
+    pub scope: Option<String>,
 }
 
 impl Default for DiscoverOptions {
@@ -32,6 +36,8 @@ impl Default for DiscoverOptions {
             retry_exhausted: false,
             retry_proof: String::new(),
             lite: false,
+            index_root: None,
+            scope: None,
         }
     }
 }
@@ -119,15 +125,17 @@ fn run_llm_judge(input: &Value, candidates: &mut Vec<SearchCandidate>) -> Value 
 
 pub fn discover(root: &Path, query: &str, options: DiscoverOptions) -> Result<Value> {
     let request = DiscoverRequest::from(root, query, &options);
+    let index_root = options.index_root.as_deref().unwrap_or(root);
+    let scope = options.scope.as_deref().filter(|scope| !scope.is_empty());
     let (mut candidates, strategies) = if request.retrieval_query.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        merge_candidates(root, &request.variants, options.top_k)?
+        merge_candidates(index_root, scope, &request.variants, options.top_k)?
     };
     let route_paths = if options.lite {
         HashSet::new()
     } else {
-        discover_graph_route_paths(root)
+        discover_graph_route_paths(index_root)
     };
     let judge_input = json!({
         "original_query": query,
@@ -237,6 +245,7 @@ impl DiscoverRequest {
 
 fn merge_candidates(
     root: &Path,
+    scope: Option<&str>,
     variants: &[(String, String)],
     top_k: usize,
 ) -> Result<(Vec<SearchCandidate>, Vec<Value>)> {
@@ -245,12 +254,13 @@ fn merge_candidates(
     let anchors = anchor_tokens(original_query);
     let mut strategy_results = Vec::new();
     for (variant_idx, (strategy, variant)) in variants.iter().enumerate() {
-        let results = search(
+        let results = search_in_scope(
             root,
             variant,
             SearchOptions {
                 top_k: top_k.max(20) * 3,
             },
+            scope,
         )?;
         strategy_results.push(json!({
             "strategy": strategy,
@@ -520,6 +530,7 @@ mod lite_tests {
             retry_exhausted: false,
             retry_proof: String::new(),
             lite,
+            ..DiscoverOptions::default()
         }
     }
 

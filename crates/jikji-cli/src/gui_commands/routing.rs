@@ -337,6 +337,7 @@ fn collect_discover_payloads(
                             retry_exhausted,
                             retry_proof: proof,
                             lite,
+                            ..Default::default()
                         },
                     )
                     .map(|mut payload| {

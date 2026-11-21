@@ -116,7 +116,7 @@ pub fn root_key(root: &Path) -> Result<String> {
 }
 
 pub fn ensure_root(connection: &Connection, root: &Path) -> Result<i64> {
-    if let Some(id) = lookup_root_id_by_keys(connection, &unresolved_root_keys(root))? {
+    if let Some(id) = lookup_root_id_by_keys(connection, &lookup_root_keys(root))? {
         return Ok(id);
     }
     let canonical = registration_root_key(root)?;
@@ -139,7 +139,7 @@ pub fn register_root(root: &Path) -> Result<i64> {
 }
 
 pub fn root_id(connection: &Connection, root: &Path) -> Result<Option<i64>> {
-    lookup_root_id_by_keys(connection, &unresolved_root_keys(root))
+    lookup_root_id_by_keys(connection, &lookup_root_keys(root))
 }
 
 /// Reject a new prepare root when it overlaps a populated searchable root.
@@ -228,6 +228,150 @@ fn unresolved_root_keys(root: &Path) -> Vec<String> {
         push_unresolved_key(&mut keys, &canonical);
     }
     keys
+}
+
+/// Registered keys to try for `root`: its own spellings, plus their NFC and NFD forms. macOS
+/// stores Korean folder names decomposed while typed paths are composed, so a registered root
+/// must be found by either. String-only (no stat), and only for lookups: a variant may not exist
+/// on disk, so registration never chooses one.
+fn lookup_root_keys(root: &Path) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let mut keys = unresolved_root_keys(root);
+    for key in keys.clone() {
+        for variant in [key.nfc().collect::<String>(), key.nfd().collect::<String>()] {
+            push_unresolved_key(&mut keys, Path::new(&variant));
+        }
+    }
+    keys
+}
+
+/// The registered index that answers a search for some folder, and the folder's place inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootScope {
+    /// Registered (indexed) root whose index is searched.
+    pub root: PathBuf,
+    /// Requested folder relative to `root`, `/`-separated; empty when the folder is the root itself.
+    pub scope: String,
+}
+
+/// Resolve `requested` to the registered root that covers it: the folder itself when it is a
+/// registered root, otherwise its nearest registered ancestor that holds an index. String-only
+/// (no stat of ancestors), so slow or cloud mounts are never touched. `None` when no index covers it.
+pub fn resolve_root_scope(requested: &Path) -> Result<Option<RootScope>> {
+    let connection = open_database()?;
+    if let Some(id) = lookup_root_id_by_keys(&connection, &lookup_root_keys(requested))? {
+        return Ok(Some(RootScope {
+            root: registered_root_path(&connection, id)?,
+            scope: String::new(),
+        }));
+    }
+    let mut best: Option<(usize, i64, String)> = None;
+    for key in unresolved_root_keys(requested) {
+        for ancestor in Path::new(&key).ancestors().skip(1) {
+            let ancestor_text = ancestor.to_string_lossy();
+            if ancestor_text.is_empty()
+                || best
+                    .as_ref()
+                    .is_some_and(|(len, ..)| *len >= ancestor_text.len())
+            {
+                continue;
+            }
+            let Some(id) = lookup_root_id_by_keys(&connection, &string_variants(&ancestor_text))?
+            else {
+                continue;
+            };
+            if !root_has_search_docs(&connection, id)? {
+                continue;
+            }
+            let Ok(relative) = Path::new(&key).strip_prefix(ancestor) else {
+                continue;
+            };
+            let scope = relative
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            best = Some((ancestor_text.len(), id, crate::path_text(&scope)));
+            break;
+        }
+    }
+    match best {
+        Some((_, id, scope)) => Ok(Some(RootScope {
+            root: registered_root_path(&connection, id)?,
+            scope,
+        })),
+        None => Ok(None),
+    }
+}
+
+/// Registered roots with an index that lie inside `requested` (at most `limit`), for telling a
+/// caller which narrower folders can be searched when `requested` itself is not indexed.
+pub fn indexed_roots_within(requested: &Path, limit: usize) -> Result<Vec<PathBuf>> {
+    let connection = open_database()?;
+    let mut found = Vec::new();
+    for key in unresolved_root_keys(requested) {
+        let mut prefix = key.trim_end_matches(std::path::MAIN_SEPARATOR).to_owned();
+        prefix.push(std::path::MAIN_SEPARATOR);
+        let escaped = prefix
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let mut statement = connection
+            .prepare(
+                "SELECT canonical_root, id FROM roots WHERE canonical_root LIKE ?1 ESCAPE '\\' \
+                 ORDER BY canonical_root LIMIT 200",
+            )
+            .map_err(sqlite_error_path)?;
+        let rows = statement
+            .query_map([format!("{escaped}%")], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(sqlite_error_path)?;
+        for row in rows {
+            let (root, id) = row.map_err(sqlite_error_path)?;
+            if found.len() < limit
+                && !found.contains(&PathBuf::from(&root))
+                && root_has_search_docs(&connection, id)?
+            {
+                found.push(PathBuf::from(root));
+            }
+        }
+    }
+    Ok(found)
+}
+
+fn string_variants(text: &str) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let mut keys = vec![text.to_owned()];
+    for variant in [
+        text.nfc().collect::<String>(),
+        text.nfd().collect::<String>(),
+    ] {
+        if !keys.contains(&variant) {
+            keys.push(variant);
+        }
+    }
+    keys
+}
+
+fn registered_root_path(connection: &Connection, id: i64) -> Result<PathBuf> {
+    connection
+        .query_row(
+            "SELECT canonical_root FROM roots WHERE id=?1",
+            [id],
+            |row| row.get::<_, String>(0),
+        )
+        .map(PathBuf::from)
+        .map_err(sqlite_error_path)
+}
+
+fn root_has_search_docs(connection: &Connection, id: i64) -> Result<bool> {
+    // A database that never built a search index has no `search_docs` table: nothing is indexed.
+    Ok(connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM search_docs WHERE root_id=?1)",
+            [id],
+            |row| row.get::<_, i64>(0),
+        )
+        .is_ok_and(|found| found != 0))
 }
 
 fn push_unresolved_key(keys: &mut Vec<String>, path: &Path) {
@@ -989,7 +1133,8 @@ fn statistics_for_id(connection: &Connection, root_id: i64) -> Result<RootStatis
 
 fn initialize(connection: &Connection, path: &Path) -> Result<()> {
     connection
-        .execute_batch(&format!(r#"
+        .execute_batch(
+            r#"
         CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS roots(id INTEGER PRIMARY KEY, canonical_root TEXT NOT NULL UNIQUE, updated_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS artifacts(root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE, ordinal INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, row_json TEXT NOT NULL);
@@ -1002,9 +1147,29 @@ fn initialize(connection: &Connection, path: &Path) -> Result<()> {
             original_len INTEGER NOT NULL CHECK(original_len >= 0),
             PRIMARY KEY(artifact_ordinal, field_name)
         );
-        INSERT INTO metadata(key,value) VALUES('schema_version','{DATABASE_SCHEMA_VERSION}') ON CONFLICT(key) DO UPDATE SET value=excluded.value;
-    "#))
-    .map_err(|source| sqlite_error(path, source))
+    "#,
+        )
+        .map_err(|source| sqlite_error(path, source))?;
+    // Write only when the stored version differs: an unconditional upsert makes every read-only
+    // consumer (`jikji find`) take SQLite's single write lock and queue behind a running `prepare`.
+    let stored: Option<String> = connection
+        .query_row(
+            "SELECT value FROM metadata WHERE key='schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|source| sqlite_error(path, source))?;
+    let current = DATABASE_SCHEMA_VERSION.to_string();
+    if stored.as_deref() != Some(current.as_str()) {
+        connection
+            .execute(
+                "INSERT INTO metadata(key,value) VALUES('schema_version',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [&current],
+            )
+            .map_err(|source| sqlite_error(path, source))?;
+    }
+    Ok(())
 }
 
 fn empty_statistics() -> RootStatistics {
@@ -1032,7 +1197,7 @@ fn remove_root_cache(root_id: i64) -> Result<()> {
 }
 
 fn ensure_root_tx(tx: &Transaction<'_>, root: &Path) -> Result<i64> {
-    if let Some(id) = lookup_root_id_by_keys(tx, &unresolved_root_keys(root))? {
+    if let Some(id) = lookup_root_id_by_keys(tx, &lookup_root_keys(root))? {
         return Ok(id);
     }
     let canonical = registration_root_key(root)?;
@@ -1100,5 +1265,110 @@ mod cloud_drive_tests {
         assert!(cloud_drive_path_blocked(&link.join("마커")));
         assert!(!cloud_drive_path_blocked(&tmp.join("Documents/notes")));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// macOS stores Korean folder names decomposed (NFD) while typed paths are composed (NFC):
+    /// a root registered in one spelling must be found by the other, without touching the disk.
+    #[test]
+    fn root_lookup_matches_either_unicode_normalization() {
+        use super::{initialize, root_id};
+        use rusqlite::Connection;
+        use unicode_normalization::UnicodeNormalization;
+
+        let nfd = "/Users/me/Documents/문서".nfd().collect::<String>();
+        let nfc = "/Users/me/Documents/문서".nfc().collect::<String>();
+        assert_ne!(nfd, nfc);
+        let connection = Connection::open_in_memory().expect("db");
+        initialize(&connection, Path::new(":memory:")).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO roots(canonical_root, updated_at) VALUES(?1, 0)",
+                [&nfd],
+            )
+            .expect("register NFD root");
+        assert_eq!(
+            root_id(&connection, Path::new(&nfc)).expect("lookup"),
+            Some(1)
+        );
+        assert_eq!(
+            root_id(&connection, Path::new(&nfd)).expect("lookup"),
+            Some(1)
+        );
+    }
+}
+
+#[cfg(test)]
+mod initialize_tests {
+    use super::{DATABASE_SCHEMA_VERSION, initialize};
+    use rusqlite::Connection;
+    use std::time::Duration;
+
+    /// A read-only consumer (`jikji find`) must be able to initialize against an already-initialized
+    /// database while another connection holds the write lock (a long `jikji prepare`). An
+    /// unconditional schema_version upsert would block it for the whole busy timeout.
+    #[test]
+    fn initialize_does_not_need_the_write_lock_when_schema_is_current() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("jikji-init-lock-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("data dir");
+        let path = dir.join("index.sqlite");
+
+        let writer = Connection::open(&path).expect("writer");
+        writer
+            .pragma_update(None, "journal_mode", "WAL")
+            .expect("wal");
+        initialize(&writer, &path).expect("first initialize creates the schema");
+        writer
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold the write lock");
+
+        let reader = Connection::open(&path).expect("reader");
+        reader.busy_timeout(Duration::ZERO).expect("no busy wait");
+        initialize(&reader, &path).expect("initialize must not require the write lock");
+
+        writer.execute_batch("ROLLBACK").expect("release");
+        let stored: String = reader
+            .query_row(
+                "SELECT value FROM metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema_version");
+        assert_eq!(stored, DATABASE_SCHEMA_VERSION.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn initialize_repairs_a_stale_schema_version() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("jikji-init-stale-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("data dir");
+        let path = dir.join("index.sqlite");
+        let connection = Connection::open(&path).expect("open");
+        initialize(&connection, &path).expect("create schema");
+        connection
+            .execute(
+                "UPDATE metadata SET value='0' WHERE key='schema_version'",
+                [],
+            )
+            .expect("make stale");
+        initialize(&connection, &path).expect("re-initialize");
+        let stored: String = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema_version");
+        assert_eq!(stored, DATABASE_SCHEMA_VERSION.to_string());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
