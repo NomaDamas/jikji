@@ -252,6 +252,7 @@ fn run_find_like(mut args: FindArgs, find_mode: bool) -> jikji_core::Result<Exit
         &SearchEvidence {
             profiles: &profiles,
             coverage: coverage.as_ref(),
+            cloud: cloud_content_for_find(&args.root, enclosing.as_ref()),
         },
         &mut notes,
     );
@@ -291,6 +292,54 @@ fn run_find_like(mut args: FindArgs, find_mode: bool) -> jikji_core::Result<Exit
 struct SearchEvidence<'a> {
     profiles: &'a [serde_json::Value],
     coverage: Option<&'a serde_json::Value>,
+    /// Content-indexing mode of a cloud-drive folder; `None` for ordinary folders.
+    cloud: Option<serde_json::Value>,
+}
+
+/// On a cloud drive only approved folders hold file text; say which mode the searched folder is in
+/// and where text can be searched instead.
+fn cloud_content_for_find(
+    folder: &Path,
+    enclosing: Option<&EnclosingIndex>,
+) -> Option<serde_json::Value> {
+    let (index_root, target) = match enclosing {
+        Some(found) => (found.root.clone(), found.root.join(&found.scope)),
+        None => (folder.to_path_buf(), folder.to_path_buf()),
+    };
+    let policy = jikji_core::cloud_content::CloudContentPolicy::load_or_deny(&index_root);
+    if !policy.is_cloud() {
+        return None;
+    }
+    let canonical = target.canonicalize().unwrap_or(target);
+    let mut mode = policy.mode_for(&canonical);
+    let approved_below = policy.approved_below(&canonical);
+    // A cloud index built before the policy existed holds file text although nothing was approved
+    // yet (the next `prepare` records it). Report what is really stored, not the empty default.
+    if mode == "filename_only" && approved_below.is_empty() {
+        let scope = enclosing.map(|found| found.scope.as_str());
+        let stored_text = jikji_search::coverage(&index_root, scope)
+            .ok()
+            .is_some_and(|c| {
+                c["by_kind"].as_object().is_some_and(|kinds| {
+                    kinds
+                        .values()
+                        .any(|kind| kind["text_indexed"].as_i64().unwrap_or(0) > 0)
+                })
+            });
+        if stored_text {
+            mode = "indexed_before_policy";
+        }
+    }
+    let mut value = serde_json::json!({
+        "mode": mode,
+        "approved_folders_below": approved_below,
+    });
+    if value["mode"] == "filename_only" {
+        value["how_to_search_contents"] = serde_json::json!(
+            "Ask the user, then run `jikji prepare <folder> --approve-cloud-content` for the one folder whose contents should be searchable."
+        );
+    }
+    Some(value)
 }
 
 /// Adds the explanations an agent needs to act on a result: what was searched, how fresh the
@@ -322,6 +371,31 @@ fn add_search_guidance(
             .map(|planned| note(planned.code, planned.message.clone())),
     );
     payload["request_plan"] = plan.json;
+    if let Some(cloud) = &evidence.cloud {
+        if cloud["mode"] == "filename_only" {
+            let approved: Vec<&str> = cloud["approved_folders_below"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect();
+            let searchable = if approved.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " Contents are searchable only in the approved folders below it: {}.",
+                    approved.join(", ")
+                )
+            };
+            notes.push(note(
+                "cloud_filename_only",
+                format!(
+                    "This folder is on a cloud-mounted drive: Jikji indexed file names, paths, sizes and times only, so words inside files are not searchable here.{searchable} Search by file or folder name, or ask the user to approve one folder for content search (`jikji prepare <folder> --approve-cloud-content`)."
+                ),
+            ));
+        }
+        payload["cloud_content"] = cloud.clone();
+    }
     payload["results"] = serde_json::Value::Array(evidence.profiles.to_vec());
     if let Some(coverage) = evidence.coverage {
         payload["coverage"] = coverage.clone();

@@ -1210,7 +1210,7 @@ fn ensure_root_tx(tx: &Transaction<'_>, root: &Path) -> Result<i64> {
     .map_err(sqlite_error_path)
 }
 
-fn sqlite_error(path: &Path, source: rusqlite::Error) -> crate::JikjiError {
+pub(crate) fn sqlite_error(path: &Path, source: rusqlite::Error) -> crate::JikjiError {
     io_error(path, Error::other(source))
 }
 

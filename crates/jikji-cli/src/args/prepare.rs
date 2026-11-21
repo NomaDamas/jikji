@@ -48,6 +48,14 @@ pub(crate) struct PrepareArgs {
     pub(crate) no_root_map: bool,
     #[arg(long, hide = true)]
     pub(crate) search_only: bool,
+    /// On a cloud-mounted drive (GoogleDrive, gdrive ...) index file names only by default. Approve
+    /// ROOT (and everything below it) to read and index file contents too; the approval is stored
+    /// and reused by later prepares of ROOT or of a parent mount. Ask the user first.
+    #[arg(long, conflicts_with = "revoke_cloud_content")]
+    pub(crate) approve_cloud_content: bool,
+    /// Withdraw an earlier approval of exactly ROOT and rebuild its index with file names only.
+    #[arg(long)]
+    pub(crate) revoke_cloud_content: bool,
 }
 
 #[derive(Debug, Parser)]

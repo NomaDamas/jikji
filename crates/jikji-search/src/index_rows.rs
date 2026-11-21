@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use jikji_core::storage::cloud_drive_path_blocked;
+use jikji_core::cloud_content::CloudContentPolicy;
 
 use serde_json::{Value, json};
 
@@ -42,10 +42,11 @@ pub(crate) fn rows_from_cards(
             chunks_by_path.entry(path).or_default().push(chunk);
         }
     }
+    let policy = CloudContentPolicy::load_or_deny(root);
     file_cards
         .iter()
         .filter(|card| card.get("status").and_then(Value::as_str) != Some("deleted"))
-        .filter_map(|card| row_from_card(root, storage_dir, card, &chunks_by_path))
+        .filter_map(|card| row_from_card(root, storage_dir, card, &chunks_by_path, &policy))
         .collect()
 }
 
@@ -54,6 +55,7 @@ fn row_from_card(
     storage_dir: &Path,
     card: &Value,
     chunks_by_path: &BTreeMap<String, Vec<&Value>>,
+    policy: &CloudContentPolicy,
 ) -> Option<IndexRow> {
     let path = value_str(card, "path")?;
     if path.contains("/.jikji/") || path.starts_with(".jikji/") {
@@ -76,6 +78,7 @@ fn row_from_card(
         &ext,
         &text_cache_path,
         chunks_by_path,
+        policy,
     );
     let chunks = chunks_by_path
         .get(&path)
@@ -132,12 +135,13 @@ fn body_for(
     ext: &str,
     text_cache_path: &str,
     chunks_by_path: &BTreeMap<String, Vec<&Value>>,
+    policy: &CloudContentPolicy,
 ) -> String {
     let mut body_parts = Vec::new();
     let cached = read_cache_text(storage_dir, text_cache_path, 64_000);
     let cache_empty = cached.is_empty();
     body_parts.push(cached);
-    if cache_empty && is_native_text_ext(ext) && allow_native_source_read(root, path) {
+    if cache_empty && is_native_text_ext(ext) && policy.allows(&root.join(path)) {
         body_parts.push(read_source_text(root.join(path), 24_000));
     }
     for chunk in chunks_by_path.get(path).into_iter().flatten().take(48) {
@@ -303,10 +307,6 @@ fn is_native_text_ext(ext: &str) -> bool {
             | "sass"
             | "less"
     )
-}
-
-fn allow_native_source_read(root: &Path, rel: &str) -> bool {
-    !cloud_drive_path_blocked(root) && !cloud_drive_path_blocked(&root.join(rel))
 }
 
 #[cfg(test)]

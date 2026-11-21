@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+pub mod cloud_content;
 pub mod compression;
 pub mod storage;
 

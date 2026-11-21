@@ -1,6 +1,10 @@
 use std::process::ExitCode;
 
 use jikji_core::PrepareOptions;
+use jikji_core::cloud_content::{
+    CloudContentPolicy, approval_key, approve_cloud_content, revoke_cloud_content,
+};
+use jikji_core::storage::cloud_drive_path_blocked;
 use jikji_index::{CleanOptions, clean, prepare, reindex_search};
 use serde_json::json;
 
@@ -12,7 +16,9 @@ pub(crate) fn run_prepare(args: PrepareArgs) -> jikji_core::Result<ExitCode> {
         return run_search_only(args);
     }
     let options = prepare_options_from_args(&args);
+    apply_cloud_decision(&args)?;
     let result = prepare(&args.root, &options)?;
+    let cloud = cloud_content_status(&result.root, &args.root);
     if options.clean_reindex {
         jikji_core::storage::vacuum_database()?;
     }
@@ -20,7 +26,10 @@ pub(crate) fn run_prepare(args: PrepareArgs) -> jikji_core::Result<ExitCode> {
         jikji_agent::write_routing_blocks(&args.root)?;
     }
     if args.json {
-        print_json(&result)?;
+        let mut value = serde_json::to_value(&result)
+            .map_err(|source| jikji_core::json_error("prepare result", source))?;
+        value["cloud_content"] = cloud;
+        print_json(&value)?;
     } else {
         println!("Jikji prepared: {}", result.root.display());
         println!(
@@ -28,8 +37,52 @@ pub(crate) fn run_prepare(args: PrepareArgs) -> jikji_core::Result<ExitCode> {
             result.files, result.folders, result.deleted
         );
         println!("- map={}", result.agent_map.display());
+        if cloud["mode"] == "filename_only" {
+            println!(
+                "- cloud drive: file names only. To search inside files of a folder, ask the user, then run `jikji prepare <folder> --approve-cloud-content`."
+            );
+        } else if cloud["mode"] == "approved_folder" {
+            println!("- cloud drive: contents indexed (approved folder)");
+        }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// `--approve-cloud-content` / `--revoke-cloud-content`: store the decision before indexing.
+fn apply_cloud_decision(args: &PrepareArgs) -> jikji_core::Result<()> {
+    if !args.approve_cloud_content && !args.revoke_cloud_content {
+        return Ok(());
+    }
+    let folder = approval_key(&args.root)?;
+    if !cloud_drive_path_blocked(&folder) && !cloud_drive_path_blocked(&args.root) {
+        return Err(jikji_core::io_error(
+            &args.root,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "not a cloud-drive path: contents of ordinary folders are indexed by default",
+            ),
+        ));
+    }
+    if args.approve_cloud_content {
+        approve_cloud_content(&folder)?;
+    } else {
+        revoke_cloud_content(&folder)?;
+    }
+    Ok(())
+}
+
+/// What `prepare` did with contents for this root, for the JSON result.
+fn cloud_content_status(root: &std::path::Path, typed: &std::path::Path) -> serde_json::Value {
+    let policy = CloudContentPolicy::load(root, &[typed])
+        .unwrap_or_else(|_| CloudContentPolicy::load_or_deny(root));
+    let mode = policy.mode_for(root);
+    let mut value = json!({"mode": mode, "approved_below": policy.approved_below(root)});
+    if mode == "filename_only" {
+        value["note"] = json!(
+            "Cloud drive: only file names, paths, sizes and times were indexed. To search inside files of one folder, ask the user, then run `jikji prepare FOLDER --approve-cloud-content`."
+        );
+    }
+    value
 }
 
 fn run_search_only(args: PrepareArgs) -> jikji_core::Result<ExitCode> {

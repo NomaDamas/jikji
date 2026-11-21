@@ -127,6 +127,24 @@ against file names, folders and the text of indexed files; the plan says what th
 - `request_plan.not_searched` lists what this request could not look at; `coverage` (on empty
   results) shows what the index can search by text at all.
 
+## Cloud Drives
+
+Folders on a cloud mount (a path component named `GoogleDrive`, `Google Drive` or `gdrive`) are
+indexed by file name, path, size and time only; Jikji never reads their contents by default.
+
+- `cloud_content.mode=filename_only` and note `cloud_filename_only`: search by file or folder
+  name. Words inside files will not match here; do not report "no such document" from an empty
+  content search on such a folder.
+- `cloud_content.mode=indexed_before_policy`: this cloud folder was indexed with text by an older
+  release; its text is searchable and the next `prepare` keeps it.
+- To search inside files of one cloud folder, ask the user first, then run
+  `jikji prepare <folder> --approve-cloud-content`. Only that folder and everything below it are
+  read; the approval is stored, and later `prepare`/`refresh` of the folder or of its parent mount
+  keeps them current. `cloud_content.approved_folders_below[]` lists approved folders under a
+  name-only mount. `jikji prepare <folder> --revoke-cloud-content` withdraws it again.
+- A cloud mount is never walked to check freshness: expect `freshness_not_checked`, and
+  `jikji refresh` the folder when files were just added.
+
 ## Stop Rule: Stop Discovery, Not The Task
 
 Retry proof and stop restrictions apply only to the discovery substep.

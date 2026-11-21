@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use jikji_core::cloud_content::CloudContentPolicy;
 use jikji_core::{PrepareOptions, Result, io_error, json_error};
 use jikji_media_bridge::{MediaBridgeOutcome, MediaBridgeStatus};
 use jikji_parser::ParseStatus;
@@ -53,6 +54,7 @@ pub(crate) fn document_rows(
     scan: &ScanResult,
     dirs: CacheDirs<'_>,
     options: &PrepareOptions,
+    content_policy: &CloudContentPolicy,
 ) -> Result<DocumentBuild> {
     let runtime = DocumentCacheRuntime::new();
     let mut rows = Vec::new();
@@ -66,6 +68,11 @@ pub(crate) fn document_rows(
             continue;
         }
         if !options.enable_media_index && MEDIA_EXTENSIONS.contains(&ext.as_str()) {
+            continue;
+        }
+        // On a cloud mount only approved folders have their contents read; everything else stays
+        // a name-only row, so a slow drive is never read through.
+        if !content_policy.allows(path) {
             continue;
         }
         let rel = rel_path(&scan.root, path);
@@ -311,6 +318,7 @@ mod tests {
                 meta: &meta,
             },
             &options,
+            &jikji_core::cloud_content::CloudContentPolicy::unrestricted(),
         )
         .expect("document rows");
         assert!(

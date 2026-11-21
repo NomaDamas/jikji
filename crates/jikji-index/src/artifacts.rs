@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 
+use jikji_core::cloud_content::{CloudContentPolicy, keep_existing_cloud_content};
 use jikji_core::storage::{
     canonical_root, ensure_prepare_root_allowed, load_artifacts, replace_prepared_artifacts,
     root_storage_dir,
@@ -38,7 +39,18 @@ pub fn prepare(root: &Path, options: &PrepareOptions) -> Result<PrepareResult> {
     let index_dir = root_storage_dir(&scan.root)?;
     ensure_generated_dir(&index_dir)?;
     let _guard = LockGuard::acquire(&index_dir)?;
-    build_artifacts(scan, options)
+    let policy = cloud_policy(root, &scan.root)?;
+    build_artifacts(scan, options, &policy)
+}
+
+/// Content-indexing decision for this root. A cloud root that was indexed with text before the
+/// policy existed keeps it (recorded once as approved), so a refresh never drops its text.
+fn cloud_policy(typed: &Path, canonical: &Path) -> Result<CloudContentPolicy> {
+    let policy = CloudContentPolicy::load(canonical, &[typed])?;
+    if policy.is_cloud() && keep_existing_cloud_content(canonical)? {
+        return CloudContentPolicy::load(canonical, &[typed]);
+    }
+    Ok(policy)
 }
 
 pub fn reindex_search(root: &Path) -> Result<SearchArtifactStats> {
@@ -62,7 +74,11 @@ pub fn reindex_search(root: &Path) -> Result<SearchArtifactStats> {
     build_search_artifacts(root, &file_rows, &chunk_rows, &folder_rows)
 }
 
-fn build_artifacts(scan: ScanResult, options: &PrepareOptions) -> Result<PrepareResult> {
+fn build_artifacts(
+    scan: ScanResult,
+    options: &PrepareOptions,
+    policy: &CloudContentPolicy,
+) -> Result<PrepareResult> {
     let index_dir = root_storage_dir(&scan.root)?;
     let doc_text_dir = index_dir.join("doc_text");
     let doc_meta_dir = index_dir.join("doc_meta");
@@ -89,6 +105,7 @@ fn build_artifacts(scan: ScanResult, options: &PrepareOptions) -> Result<Prepare
             meta: &doc_meta_dir,
         },
         options,
+        policy,
     )?;
     file_rows = merge_document_fields(file_rows, &docs.rows);
     file_rows.append(&mut deleted_rows);
