@@ -67,6 +67,7 @@ pub(crate) fn run_gui(args: GuiArgs) -> jikji_core::Result<ExitCode> {
     } else if !args.serve_child {
         println!("Jikji GUI: {url}");
         println!("Access token: {}", access_token.as_str());
+        println!("Management token: {}", token.as_str());
     }
     let gate = AccessGate::new(access_token, args.allow_host);
     serve_loop(listener, GuiState::new(root, token), gate)

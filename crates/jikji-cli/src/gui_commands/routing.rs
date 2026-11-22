@@ -2013,7 +2013,13 @@ fn prepare_operation_response(
         Err(response) => return response,
     };
     let job_options = options.clone();
+    let mutation = state.mutation.clone();
     let job_id = state.jobs.start(move |_| {
+        // Serialize all mutating work inside the job. The HTTP handler must return immediately,
+        // but a refresh must not race another prepared-artifact writer.
+        let _guard = mutation
+            .lock()
+            .map_err(|_| "management lock poisoned".to_owned())?;
         let result = prepare(&root, &job_options).map_err(|error| error.to_string())?;
         let payload = json!({"root":root,"files":result.files,"documents":result.docs_parsed,"deep":deep});
         if deep {
@@ -2131,7 +2137,11 @@ fn index_selection_response(state: &GuiState, query: &str) -> HttpResponse {
     }
     let selected = paths.len();
     let job_mode = mode.clone();
+    let mutation = state.mutation.clone();
     let job_id = state.jobs.start(move |_| {
+        let _guard = mutation
+            .lock()
+            .map_err(|_| "management lock poisoned".to_owned())?;
         let result = prepare(&root, &options).map_err(|error| error.to_string())?;
         Ok(json!({"root":root,"mode":job_mode,"selected":selected,"files":result.files,"documents":result.docs_parsed}))
     });
