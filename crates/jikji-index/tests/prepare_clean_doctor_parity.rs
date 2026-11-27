@@ -288,3 +288,30 @@ fn clean_reindex_rebuilds_without_tombstones_or_source_deletion() {
     );
     assert_eq!(fs::read_to_string(source).unwrap(), "stable source");
 }
+
+#[test]
+fn a_folder_the_parent_index_does_not_hold_may_be_indexed_but_one_it_holds_may_not() {
+    // A project created after its parent was indexed (or skipped by it) has nothing in the parent
+    // index. It must be indexable by itself, or every search of it stays empty for good.
+    let temp = tempfile::tempdir().unwrap();
+    let (_lock, _data) = isolate_data_dir();
+    let held = temp.path().join("held");
+    let later = temp.path().join("created-later");
+    fs::create_dir(&held).unwrap();
+    fs::write(held.join("document.txt"), "held body").unwrap();
+    prepare(temp.path(), &PrepareOptions::default()).unwrap();
+    fs::create_dir(&later).unwrap();
+    fs::write(later.join("document.txt"), "later body").unwrap();
+
+    let refused = prepare(&held, &PrepareOptions::default()).expect_err("parent holds it");
+    assert!(
+        refused
+            .to_string()
+            .contains("prepare root overlaps existing indexed root"),
+        "{refused}"
+    );
+    let result = prepare(&later, &PrepareOptions::default()).expect("parent does not hold it");
+    assert_eq!(result.files, 1);
+    // Still refreshable on its own, twice.
+    prepare(&later, &PrepareOptions::default()).expect("exact refresh");
+}

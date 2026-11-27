@@ -66,6 +66,10 @@ directory. That is the expected fast-start path; it is separate from `find`.
 - `results[]`: per returned path, `file_kind`, `text_indexed`, `matched_in`
   (`name_path`/`text`), `matched_words` (which of `request_plan.query_words` the file contains)
   and `snippet` (the passage around the match, first 20 results).
+- `scan_incomplete` (field and note): the whole-index body scan stopped at its time limit
+  (`JIKJI_FALLBACK_SCAN_BUDGET_MS`, default 4000); results may be missing. `freshness_not_checked`
+  is reported at once for trees too large to compare in the freshness budget
+  (`JIKJI_FRESHNESS_BUDGET_MS`, default 2000, about 20000 files per second).
 - `--brief` (with `--json`): drops internal ranking diagnostics (`strategy_results`,
   `llm_judge_input`, `judge_candidate_slate`, `search_plan`, `llm_search_plan`, ...); keeps paths,
   `results`, `request_plan`, `notes`, index status and the retry contract. `next_commands[]` are

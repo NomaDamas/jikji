@@ -1,5 +1,7 @@
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use jikji_core::Result;
 use jikji_core::storage::{database_path, migrate_legacy, open_database, root_id};
@@ -262,11 +264,51 @@ fn scope_doc_ids(con: &Connection, pattern: &str) -> Result<HashSet<i64>> {
     Ok(ids)
 }
 
+/// Longest the whole-index substring scans of ONE search may run in total. Words the index has no
+/// term for fall back to reading every document body; on a folder with hundreds of thousands of
+/// files that is tens of seconds per query variant, which is past what an agent tool waits for. A
+/// scan that runs out of time stops, keeps what it found and says so (`take_scan_incomplete`).
+const FALLBACK_SCAN_BUDGET_MS: u64 = 4_000;
+
+fn fallback_scan_budget() -> Duration {
+    let millis = std::env::var("JIKJI_FALLBACK_SCAN_BUDGET_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(FALLBACK_SCAN_BUDGET_MS);
+    Duration::from_millis(millis)
+}
+
+thread_local! {
+    /// When this thread's current search must stop scanning; set by its first scan.
+    static SCAN_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// Set by a scan that stopped at the deadline.
+    static SCAN_INCOMPLETE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Start a new search on this thread: its scans get a fresh time budget.
+pub fn reset_scan_budget() {
+    SCAN_DEADLINE.with(|deadline| deadline.set(None));
+    SCAN_INCOMPLETE.with(|flag| flag.set(false));
+}
+
+/// True when a scan of the current search stopped at its time budget.
+pub fn scan_incomplete() -> bool {
+    SCAN_INCOMPLETE.with(Cell::get)
+}
+
 fn fallback_scan_docs(
     con: &Connection,
     query: &str,
     scope_pattern: Option<&str>,
 ) -> Result<Vec<SearchCandidate>> {
+    let deadline = SCAN_DEADLINE.with(|slot| match slot.get() {
+        Some(deadline) => deadline,
+        None => {
+            let deadline = Instant::now() + fallback_scan_budget();
+            slot.set(Some(deadline));
+            deadline
+        }
+    });
     let query_tokens = tokens(query, 32);
     let mut stmt = con
         .prepare(
@@ -289,7 +331,12 @@ fn fallback_scan_docs(
         })
         .map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))?;
     let mut out = Vec::new();
-    for row in rows {
+    for (scanned, row) in rows.enumerate() {
+        // Checked every 256 rows: a clock read per row would itself cost on a large index.
+        if scanned % 256 == 0 && Instant::now() >= deadline {
+            SCAN_INCOMPLETE.with(|flag| flag.set(true));
+            break;
+        }
         let (path, name, duplicate_group_id, value) =
             row.map_err(|source| sqlite_error(Path::new("search_index.sqlite"), source))?;
         let haystack = serde_json::to_string(&value)

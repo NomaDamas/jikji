@@ -236,7 +236,7 @@ fn zero_results_say_whether_nothing_matched_the_scope_is_empty_or_the_path_is_wr
     );
     let advice = empty_folder["notes"].to_string();
     assert!(
-        advice.contains("jikji refresh") && advice.contains("ask the user first"),
+        advice.contains("jikji prepare") && advice.contains("ask the user first"),
         "{advice}"
     );
 
@@ -409,13 +409,13 @@ fn a_hidden_subfolder_is_explained_as_skipped_not_as_newer_than_the_index() {
         "must not suggest a refresh that cannot help: {notes}"
     );
 
-    // A normal sub-folder that is simply newer than the index keeps the refresh advice.
+    // A normal sub-folder that is simply newer than the index is indexed by itself.
     let fresh = fixture.root.join("brand-new");
     fs::create_dir_all(&fresh).unwrap();
     fs::write(fresh.join("a.txt"), "webchat").unwrap();
     let newer = fixture.find(&fresh, "webchat", &[]);
     let notes = newer["notes"].to_string();
-    assert!(notes.contains("jikji refresh"), "{notes}");
+    assert!(notes.contains("jikji prepare"), "{notes}");
     assert!(!notes.contains("--include-hidden"), "{notes}");
 }
 
@@ -459,5 +459,95 @@ fn brief_drops_internal_diagnostics_but_keeps_what_an_agent_acts_on() {
     assert_eq!(
         full["llm_search_plan"]["mode"],
         "one_call_multi_search_judge"
+    );
+}
+
+#[test]
+fn a_whole_index_scan_stops_at_its_time_budget_and_says_results_may_be_missing() {
+    // A word the index has no term for is looked for by reading every document body. On a huge
+    // folder that took tens of seconds; the scan now has a time budget and reports when it ran out.
+    let fixture = Fixture::indexed();
+    fs::write(
+        fixture.root.join("long-word.txt"),
+        "supercalifragilisticexpialidocious contract",
+    )
+    .unwrap();
+    fixture.run(
+        &["prepare", &fixture.root_str(), "--no-agent-rules", "--json"],
+        &[],
+    );
+    // A fragment of an indexed word: the index has no term for it, only the body scan finds it.
+    let args = [
+        "find",
+        &fixture.root_str(),
+        "califragilistic",
+        "--json",
+        "--no-background-refresh",
+    ];
+    let found = fixture.run(&args, &[]);
+    assert!(
+        !paths(&found).is_empty(),
+        "the scan still finds substrings: {found}"
+    );
+    assert_eq!(found["scan_incomplete"], false, "{found}");
+    assert!(!note_codes(&found).contains(&"scan_incomplete".to_owned()));
+
+    // With no time left the scan stops before reading anything, and the answer says so instead of
+    // pretending the word does not exist.
+    let cut = fixture.run(&args, &[("JIKJI_FALLBACK_SCAN_BUDGET_MS", "0")]);
+    assert_eq!(cut["scan_incomplete"], true, "{cut}");
+    assert!(
+        note_codes(&cut).contains(&"scan_incomplete".to_owned()),
+        "{cut}"
+    );
+    assert!(
+        cut["notes"].to_string().contains("grep") && cut["notes"].to_string().contains("narrower"),
+        "{cut}"
+    );
+    // A word the index does know is unaffected by the budget.
+    let known = fixture.run(
+        &[
+            "find",
+            &fixture.root_str(),
+            "webchat",
+            "--json",
+            "--no-background-refresh",
+        ],
+        &[("JIKJI_FALLBACK_SCAN_BUDGET_MS", "0")],
+    );
+    assert!(!paths(&known).is_empty());
+    assert_eq!(known["scan_incomplete"], false);
+}
+
+#[test]
+fn a_tree_too_big_to_walk_in_the_freshness_budget_is_reported_not_walked() {
+    // The index remembers its file count: a tree larger than the budget can cover is reported as
+    // `freshness_not_checked` at once, and a small one is still compared.
+    let fixture = Fixture::indexed();
+    fs::write(fixture.root.join("added-after.txt"), "qznew997unique").unwrap();
+    let root = fixture.root_str();
+    let args = [
+        "find",
+        root.as_str(),
+        "webchat",
+        "--json",
+        "--no-background-refresh",
+    ];
+    // Six files fit in a one-second budget at the assumed walk speed: the change is noticed.
+    let fits = fixture.run(&args, &[("JIKJI_FRESHNESS_BUDGET_MS", "1000")]);
+    assert_eq!(
+        fits["index_status"], "changed_using_previous_index",
+        "{fits}"
+    );
+    assert!(!note_codes(&fits).contains(&"freshness_not_checked".to_owned()));
+    // No budget covers no file: not compared, said so.
+    let none = fixture.run(&args, &[("JIKJI_FRESHNESS_BUDGET_MS", "0")]);
+    assert!(
+        note_codes(&none).contains(&"freshness_not_checked".to_owned()),
+        "{none}"
+    );
+    assert_ne!(
+        none["index_status"], "changed_using_previous_index",
+        "{none}"
     );
 }

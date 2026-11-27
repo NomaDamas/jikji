@@ -143,8 +143,27 @@ fn tree_changed(root: &Path, manifest: &Value) -> Option<bool> {
     if cloud_drive_path_blocked(root) {
         return None;
     }
+    // The index remembers how many files the tree had. A tree that size cannot be walked within the
+    // budget, so walking it only burns the whole budget on every search and ends in "not checked"
+    // anyway: say so at once.
+    let stored_files = manifest
+        .get("source_tree_signature")
+        .and_then(|value| value.get("files"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if stored_files > max_files_for_budget(freshness_budget()) {
+        return None;
+    }
     let current = compute_source_tree_digest(root, Instant::now() + freshness_budget())?;
     Some(current != stored)
+}
+
+/// Files the freshness walk can be expected to cover within `budget`. Measured at hundreds of
+/// thousands of files per second warm; the margin covers a cold disk and the per-file metadata read
+/// of the digest pass that follows the walk.
+fn max_files_for_budget(budget: Duration) -> u64 {
+    const FILES_PER_SECOND: u64 = 20_000;
+    FILES_PER_SECOND.saturating_mul(budget.as_millis().min(u128::from(u64::MAX)) as u64) / 1000
 }
 
 fn compute_source_tree_digest(root: &Path, deadline: Instant) -> Option<String> {
@@ -238,4 +257,37 @@ fn mtime_ns(metadata: &fs::Metadata) -> u128 {
         .ok()
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |duration| duration.as_nanos())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use serde_json::json;
+
+    use super::{max_files_for_budget, tree_changed};
+
+    #[test]
+    fn the_walk_budget_covers_a_known_number_of_files() {
+        assert_eq!(max_files_for_budget(Duration::from_millis(0)), 0);
+        assert_eq!(max_files_for_budget(Duration::from_secs(1)), 20_000);
+        assert_eq!(max_files_for_budget(Duration::from_millis(2_000)), 40_000);
+    }
+
+    #[test]
+    fn a_tree_bigger_than_the_budget_covers_is_not_walked_and_reports_not_compared() {
+        // The root does not exist: a walk would find nothing and a digest would differ. Not
+        // comparing at all (`None`) is only possible when the stored file count rules the walk out.
+        let huge = json!({"source_tree_signature": {"digest": "x", "files": 900_000}});
+        assert_eq!(
+            tree_changed(std::path::Path::new("/no/such/root"), &huge),
+            None
+        );
+        // A small tree is compared: the digest of an empty walk differs from the stored one.
+        let small = json!({"source_tree_signature": {"digest": "x", "files": 3}});
+        assert_eq!(
+            tree_changed(std::path::Path::new("/no/such/root"), &small),
+            Some(true)
+        );
+    }
 }

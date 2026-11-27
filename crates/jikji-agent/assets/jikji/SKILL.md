@@ -174,6 +174,28 @@ Lessons from agent logs. Each is a general rule, not a case:
   shadowing `jikji` earlier on `PATH` (for example a leftover Python entry point) fails before any
   search runs: report it instead of falling back silently.
 
+## When Jikji Fails: Narrow, Do Not Sweep
+
+Most raw-search detours in agent logs began with a Jikji failure, not with ignoring Jikji. Handle
+each failure by narrowing, never by sweeping a wide folder:
+
+- **A search never edits your files.** `jikji find` is read-only for the user's files: it reads an
+  index kept in Jikji's own data folder. It is allowed in read-only and plan-mode tasks; "do not
+  modify files" or "no indexing of the project" is no reason to skip it. (Only `jikji prepare`
+  and `jikji refresh` build an index, and only into that data folder.)
+- **`notes[]` `scan_incomplete`**: the index has no entry for some word, so Jikji read document
+  bodies until its time limit. Files further down were not checked. Use a distinctive word from the
+  file name, name a narrower folder, or `grep` inside the folder you mean.
+- **`scope_has_no_indexed_files`** for a project folder: the enclosing index (usually the home
+  folder) holds none of its files, for example because the project was created after that index.
+  Do not conclude the file does not exist. Ask the user, then run
+  `jikji prepare <project> --no-agent-rules` (it reads only that folder), and search again.
+- **`freshness_not_checked`**: the folder is too large to compare with the index within the time
+  limit. A file created or renamed since the last index may be missing: read recently edited
+  files directly.
+- **Never answer a failed or empty Jikji search with `glob **/*` or `grep -r` over a home folder or a
+  folder of many projects.** Name the likely project or sub-folder first and search only that.
+
 ## Stop Rule: Stop Discovery, Not The Task
 
 Retry proof and stop restrictions apply only to the discovery substep.

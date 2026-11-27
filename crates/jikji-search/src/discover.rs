@@ -124,6 +124,8 @@ fn run_llm_judge(input: &Value, candidates: &mut Vec<SearchCandidate>) -> Value 
 }
 
 pub fn discover(root: &Path, query: &str, options: DiscoverOptions) -> Result<Value> {
+    // One time budget for all the whole-index scans of this request (its query variants share it).
+    crate::searcher::reset_scan_budget();
     let request = DiscoverRequest::from(root, query, &options);
     let index_root = options.index_root.as_deref().unwrap_or(root);
     let scope = options.scope.as_deref().filter(|scope| !scope.is_empty());
@@ -203,6 +205,7 @@ pub fn discover(root: &Path, query: &str, options: DiscoverOptions) -> Result<Va
         "llm_judge_result": judge_result,
         "evidence_pack": answer_pack["evidence_pack"].clone(),
         "candidates": compact_candidates(&candidates),
+        "scan_incomplete": crate::searcher::scan_incomplete(),
     }))
 }
 

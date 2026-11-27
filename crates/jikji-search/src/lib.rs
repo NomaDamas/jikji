@@ -29,7 +29,9 @@ pub use discover::{DiscoverOptions, discover};
 pub use graph::{explain_source, graph_query, graph_status};
 pub use profile::{FileKind, coverage, file_kind, profile_results, query_words};
 pub use scope::{count_root_docs, count_scope_docs, rebase_payload_paths};
-pub use searcher::{SearchCandidate, SearchOptions, search, search_in_scope};
+pub use searcher::{
+    SearchCandidate, SearchOptions, reset_scan_budget, scan_incomplete, search, search_in_scope,
+};
 pub use status::{
     IndexStatus, SearchIndexStatus, TreeCheck, search_index_status, search_index_status_with,
 };

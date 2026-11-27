@@ -63,17 +63,16 @@ pub(crate) fn read_source_text(path: PathBuf, limit: usize) -> String {
         )
         .ok()
     } else {
-        let bytes = match std::str::from_utf8(&raw) {
-            Ok(text) => text,
+        match std::str::from_utf8(&raw) {
+            Ok(text) => Some(text.to_owned()),
             Err(error) if error.error_len().is_none() && raw.len() as u64 == max_bytes => {
-                match std::str::from_utf8(&raw[..error.valid_up_to()]) {
-                    Ok(text) => text,
-                    Err(_) => return String::new(),
-                }
+                // The byte limit cut a multi-byte character in half; keep the whole ones.
+                std::str::from_utf8(&raw[..error.valid_up_to()])
+                    .ok()
+                    .map(str::to_owned)
             }
-            Err(_) => return String::new(),
-        };
-        Some(bytes.to_owned())
+            Err(_) => decode_korean_legacy(&raw, raw.len() as u64 == max_bytes),
+        }
     };
     text.filter(|value| {
         !value
@@ -82,6 +81,21 @@ pub(crate) fn read_source_text(path: PathBuf, limit: usize) -> String {
     })
     .map(|value| value.chars().take(limit).collect())
     .unwrap_or_default()
+}
+
+/// Korean Windows text files are often CP949, not UTF-8. A file cut by the byte limit may end in
+/// half a double-byte character, so one trailing byte is allowed to be dropped.
+fn decode_korean_legacy(raw: &[u8], cut_by_limit: bool) -> Option<String> {
+    let whole = encoding_rs::EUC_KR.decode_without_bom_handling_and_without_replacement(raw);
+    if let Some(text) = whole {
+        return Some(text.into_owned());
+    }
+    if cut_by_limit && raw.len() > 1 {
+        return encoding_rs::EUC_KR
+            .decode_without_bom_handling_and_without_replacement(&raw[..raw.len() - 1])
+            .map(|text| text.into_owned());
+    }
+    None
 }
 
 fn read_cache_dir_text(path: &Path, limit: usize) -> String {
@@ -193,5 +207,28 @@ mod tests {
         let text = read_source_text(path, 100);
         assert_eq!(text.len(), 100);
         assert_eq!(text, "x".repeat(100));
+    }
+
+    #[test]
+    fn cp949_text_is_read_and_binary_is_not() {
+        let tmp = temp_tree("cp949");
+        let (bytes, _, _) = encoding_rs::EUC_KR.encode("unique11 한글 cp949 본문");
+        let path = tmp.0.join("old.txt");
+        fs::write(&path, &bytes).expect("cp949 file");
+        assert_eq!(read_source_text(path, 100), "unique11 한글 cp949 본문");
+
+        let binary = tmp.0.join("blob.txt");
+        fs::write(&binary, [0x00u8, 0x01, 0xfe, 0xfd, 0x90, 0x00, 0x02]).expect("binary file");
+        assert_eq!(read_source_text(binary, 100), "");
+    }
+
+    #[test]
+    fn cp949_text_cut_inside_a_double_byte_character_is_still_read() {
+        let tmp = temp_tree("cp949-cut");
+        let (bytes, _, _) = encoding_rs::EUC_KR.encode("a가나다라마바사");
+        let path = tmp.0.join("long.txt");
+        fs::write(&path, &bytes).expect("cp949 file");
+        // limit 1 char -> 4 bytes read: 'a' + '가' + the first byte of '나'.
+        assert_eq!(read_source_text(path, 1), "a");
     }
 }

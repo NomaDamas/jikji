@@ -175,16 +175,29 @@ pub fn ensure_prepare_root_allowed(root: &Path) -> Result<()> {
     }
     let mut statement = connection
         .prepare(
-            "SELECT r.canonical_root FROM roots r
+            "SELECT r.canonical_root, r.id FROM roots r
              WHERE r.id IN (SELECT DISTINCT root_id FROM search_docs)",
         )
         .map_err(sqlite_error_path)?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
         .map_err(sqlite_error_path)?;
     for row in rows {
-        let existing = PathBuf::from(row.map_err(sqlite_error_path)?);
+        let (existing, existing_id) = row.map_err(sqlite_error_path)?;
+        let existing = PathBuf::from(existing);
         if existing == canonical {
+            continue;
+        }
+        // A folder inside an indexed root is refused only when that index really holds its files:
+        // indexing it again would duplicate them. A project created after the parent was indexed
+        // (or skipped by it) has nothing in the parent index, and refusing it would leave every
+        // search of that project empty for good.
+        if canonical.starts_with(&existing)
+            && let Ok(relative) = canonical.strip_prefix(&existing)
+            && !existing_index_holds_folder(&connection, existing_id, relative)?
+        {
             continue;
         }
         // Cloud-drive roots are intentionally allowed to overlap: a parent drive
@@ -206,6 +219,29 @@ pub fn ensure_prepare_root_allowed(root: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Whether the index of root `id` holds any file below `folder` (relative to that root).
+fn existing_index_holds_folder(connection: &Connection, id: i64, folder: &Path) -> Result<bool> {
+    let relative = folder
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    let like = format!(
+        "{}/%",
+        relative
+            .trim_matches('/')
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM search_docs WHERE root_id=?1 AND path LIKE ?2 ESCAPE '\\')",
+            params![id, like],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|found| found != 0)
+        .map_err(sqlite_error_path)
 }
 
 fn unresolved_root_keys(root: &Path) -> Vec<String> {

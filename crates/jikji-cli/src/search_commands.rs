@@ -403,6 +403,12 @@ fn add_search_guidance(
     if let Some(coverage) = evidence.coverage {
         payload["coverage"] = coverage.clone();
     }
+    if payload["scan_incomplete"] == true {
+        notes.push(note(
+            "scan_incomplete",
+            "The index has no entry for some of these words, so Jikji reads document bodies one by one; on this large index that stopped at its time limit, so files further down were not checked. Results may be missing: try a distinctive word that appears in the file name, search a narrower folder, or use grep inside the folder you mean.".to_owned(),
+        ));
+    }
     if args.query.trim().is_empty() {
         payload["empty_reason"] = serde_json::json!("empty_query");
         notes.push(note(
@@ -442,10 +448,13 @@ fn add_search_guidance(
                     " `{name}` is a hidden folder: it is indexed only with `jikji prepare {} --include-hidden` (ask the user first).",
                     args.root.display()
                 ),
+                // The enclosing index holds none of this folder: index the folder by itself. That is
+                // cheap (it reads only this folder) and leaves the large index alone; a refresh of
+                // the enclosing root would reprocess everything in it.
                 (Some(found), None) => format!(
-                    " The enclosing index of {} holds nothing from this folder (it was built before the folder existed, or skips it). Search it with grep or direct reads for now; `jikji refresh {}` would add it but reprocesses that whole root, so ask the user first.",
+                    " The enclosing index of {} holds nothing from this folder (it was built before the folder existed, or skips it). Index just this folder with `jikji prepare {} --no-agent-rules` (it reads only this folder and leaves the large index alone; ask the user first), then search again. Until then use grep or direct reads here.",
                     found.root.display(),
-                    found.root.display()
+                    crate::query_shape::shell_quote(&args.root.display().to_string())
                 ),
                 (None, None) => String::new(),
             };

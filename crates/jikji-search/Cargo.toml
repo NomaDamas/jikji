@@ -12,6 +12,7 @@ jikji-core.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+encoding_rs = "0.8"
 sha2.workspace = true
 unicode-normalization.workspace = true
 
