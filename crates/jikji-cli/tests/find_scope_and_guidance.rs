@@ -551,3 +551,35 @@ fn a_tree_too_big_to_walk_in_the_freshness_budget_is_reported_not_walked() {
         "{none}"
     );
 }
+
+#[test]
+fn a_deleted_file_is_not_handed_to_the_agent_as_an_answer() {
+    // The index still lists a file removed after the last `prepare`. The folder is compared with
+    // the index and found changed, so the result is reindexed once instead of naming a dead path.
+    let fixture = Fixture::indexed();
+    fs::write(fixture.root.join("other/gone.txt"), "zzvanishing token").unwrap();
+    fixture.run(
+        &[
+            "prepare",
+            fixture.root_str().as_str(),
+            "--no-agent-rules",
+            "--json",
+        ],
+        &[],
+    );
+    let before = fixture.find(&fixture.root, "zzvanishing", &[]);
+    assert_eq!(paths(&before), ["other/gone.txt"], "{before}");
+
+    fs::remove_file(fixture.root.join("other/gone.txt")).unwrap();
+    let after = fixture.find(&fixture.root, "zzvanishing", &[]);
+    assert!(
+        paths(&after).is_empty(),
+        "a deleted file was returned: {after}"
+    );
+    assert_eq!(after["empty_result_reindexed"], true, "{after}");
+
+    // A file that still exists is returned from the index without any reindex.
+    let kept = fixture.find(&fixture.root, "underscore", &[]);
+    assert_eq!(kept["empty_result_reindexed"], false, "{kept}");
+    assert!(!paths(&kept).is_empty(), "{kept}");
+}

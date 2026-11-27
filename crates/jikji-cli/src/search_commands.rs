@@ -204,15 +204,18 @@ fn run_find_like(mut args: FindArgs, find_mode: bool) -> jikji_core::Result<Exit
         Ok(payload) => payload,
         Err(error) => return emit_find_recovery(&args, "failure", Some(error.to_string())),
     };
-    // An empty result is retried after one reindex only when the folder was compared with the index
-    // and found changed. An unchanged folder has nothing new to find, and a folder too large (or
-    // on a mount) to compare must not block the search for minutes: both get an explanation instead.
+    // A result is retried after one reindex only when the folder was compared with the index and
+    // found changed, and the result is empty or names a file that no longer exists. An unchanged
+    // folder has nothing new to find, and a folder too large (or on a mount) to compare must not
+    // block the search for minutes: both get an explanation instead.
     let reindex_allowed = enclosing.is_none()
         && !args.query.trim().is_empty()
         && !prepared.foreground_prepared
         && prepared.freshness_checked
         && prepared.status == IndexStatus::ChangedUsingPreviousIndex;
-    let empty_result_reindexed = if reindex_allowed && payload_paths_empty(&payload) {
+    let empty_result_reindexed = if reindex_allowed
+        && (payload_paths_empty(&payload) || payload_names_missing_file(&payload, &args.root))
+    {
         prepare(&args.root, &prepare_options)?;
         payload = discover_payload(&args)?;
         prepared.status = IndexStatus::Ready;
@@ -513,6 +516,19 @@ fn hidden_component(requested: &Path, enclosing: Option<&EnclosingIndex>) -> Opt
         let name = component.as_os_str().to_str()?;
         (name.starts_with('.') && name.len() > 1 && name != "..").then(|| name.to_owned())
     })
+}
+
+/// True when a result path no longer exists under `root`: the index still lists a deleted file.
+fn payload_names_missing_file(payload: &serde_json::Value, root: &Path) -> bool {
+    payload
+        .get("paths")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|paths| {
+            paths
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|path| std::fs::symlink_metadata(root.join(path)).is_err())
+        })
 }
 
 fn payload_paths_empty(payload: &serde_json::Value) -> bool {
