@@ -227,7 +227,7 @@ fn exact_alternative(kind: ExactKind, query: &str, folder: &Path, results: &[Val
             json!({
                 "tool": "grep",
                 "why": "Exact text, code symbols and regular expressions are matched by grep, not by an index of words.",
-                "command": format!("grep {mode} -e {} {}", shell_quote(query), shell_quote(&folder.display().to_string())),
+                "command": format!("grep {mode} -e {} {}", crate::query_shape::shell_quote(query), crate::query_shape::shell_quote(&folder.display().to_string())),
                 "narrow_to": narrow_to,
             })
         }
@@ -245,10 +245,6 @@ fn line_reference_file(query: &str) -> Option<String> {
                 .is_some_and(|(stem, ext)| !stem.is_empty() && !ext.is_empty()))
         .then(|| file.to_owned())
     })
-}
-
-fn shell_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]

@@ -7,6 +7,11 @@
 //! question marks and dots, so a character alone never decides: it must form regex or code
 //! syntax (an escape, a quantified group, a call, a generic, a path-like reference...).
 
+/// `text` as one POSIX-shell word: single-quoted, with embedded `'` written `'\''`.
+pub(crate) fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
 /// What a query that Jikji cannot answer by words looks like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExactKind {
@@ -200,7 +205,7 @@ fn is_file_line_ref(token: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExactKind, exact_kind};
+    use super::{ExactKind, exact_kind, shell_quote};
 
     #[test]
     fn exact_requests_are_classified_by_what_they_ask_for() {
@@ -260,5 +265,13 @@ mod tests {
         ] {
             assert_eq!(exact_kind(q), None, "{q:?} is a plain file request");
         }
+    }
+
+    #[test]
+    fn shell_quote_survives_spaces_quotes_and_dollars() {
+        assert_eq!(shell_quote("plain"), "'plain'");
+        assert_eq!(shell_quote("a b"), "'a b'");
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        assert_eq!(shell_quote("$HOME `x` \"q\""), "'$HOME `x` \"q\"'");
     }
 }

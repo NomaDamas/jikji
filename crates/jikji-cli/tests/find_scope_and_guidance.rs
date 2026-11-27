@@ -344,3 +344,120 @@ fn decompose_hangul(text: &str) -> String {
     }
     out
 }
+
+/// Runs a `next_commands[]` string the way an agent does: pasted into a POSIX shell.
+fn run_suggested(fixture: &Fixture, command: &str) -> Value {
+    let jikji = env!("CARGO_BIN_EXE_jikji");
+    let line = command.replacen("jikji", &format!("'{jikji}'"), 1);
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(&line)
+        .env("JIKJI_DATA_DIR", &fixture.data)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "suggested command failed: {line}\nstderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn the_suggested_retry_command_runs_as_written_for_queries_and_roots_with_spaces_and_quotes() {
+    // A missing index answers with a retry command carrying the root and the query verbatim.
+    let fixture = Fixture::indexed();
+    let spaced_root = fixture._temp.path().join("my docs it's");
+    fs::create_dir_all(&spaced_root).unwrap();
+    for query in [
+        "지금까지 본 문서",
+        "two words",
+        "it's \"quoted\" $HOME `x`",
+        "plain",
+    ] {
+        let first = fixture.find(&spaced_root, query, &[]);
+        assert_eq!(first["handoff_action"], "jikji_retry", "{query}");
+        let command = first["next_commands"][0].as_str().unwrap();
+        let second = run_suggested(&fixture, command);
+        assert_eq!(
+            second["handoff_action"], "raw_fallback_after_retry",
+            "{query}: {command}"
+        );
+        assert_eq!(second["query"], query);
+    }
+}
+
+#[test]
+fn a_hidden_subfolder_is_explained_as_skipped_not_as_newer_than_the_index() {
+    // Indexes skip dot-folders, so a refresh of the parent would never add them: the guidance must
+    // not promise that, and must name the folder and the one command that does index it.
+    let fixture = Fixture::indexed();
+    let hidden = fixture.root.join(".agent-logs");
+    fs::create_dir_all(&hidden).unwrap();
+    fs::write(hidden.join("session.txt"), "webchat transcript").unwrap();
+
+    let found = fixture.find(&hidden, "webchat", &[]);
+    assert_eq!(
+        found["empty_reason"], "scope_has_no_indexed_files",
+        "{found}"
+    );
+    let notes = found["notes"].to_string();
+    assert!(notes.contains(".agent-logs"), "{notes}");
+    assert!(notes.contains("--include-hidden"), "{notes}");
+    assert!(
+        !notes.contains("would add it but reprocesses"),
+        "must not suggest a refresh that cannot help: {notes}"
+    );
+
+    // A normal sub-folder that is simply newer than the index keeps the refresh advice.
+    let fresh = fixture.root.join("brand-new");
+    fs::create_dir_all(&fresh).unwrap();
+    fs::write(fresh.join("a.txt"), "webchat").unwrap();
+    let newer = fixture.find(&fresh, "webchat", &[]);
+    let notes = newer["notes"].to_string();
+    assert!(notes.contains("jikji refresh"), "{notes}");
+    assert!(!notes.contains("--include-hidden"), "{notes}");
+}
+
+#[test]
+fn brief_drops_internal_diagnostics_but_keeps_what_an_agent_acts_on() {
+    let fixture = Fixture::indexed();
+    let full = fixture.find(&fixture.root, "webchat", &[]);
+    let brief = fixture.find(&fixture.root, "webchat", &["--brief"]);
+
+    for kept in [
+        "paths",
+        "answer_paths",
+        "results",
+        "request_plan",
+        "notes",
+        "index_status",
+        "handoff_action",
+        "retry_proof",
+        "next_commands",
+        "jikji_version",
+    ] {
+        assert_eq!(brief[kept], full[kept], "{kept} must survive --brief");
+    }
+    for dropped in [
+        "strategy_results",
+        "llm_judge_input",
+        "judge_candidate_slate",
+        "search_plan",
+    ] {
+        assert!(
+            full.get(dropped).is_some(),
+            "{dropped} is in the default output"
+        );
+        assert!(
+            brief.get(dropped).is_none(),
+            "{dropped} must be gone with --brief"
+        );
+    }
+    assert!(brief.to_string().len() < full.to_string().len());
+    // The default output is unchanged for existing integrations.
+    assert_eq!(
+        full["llm_search_plan"]["mode"],
+        "one_call_multi_search_judge"
+    );
+}

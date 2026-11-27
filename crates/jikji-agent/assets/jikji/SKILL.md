@@ -145,6 +145,35 @@ indexed by file name, path, size and time only; Jikji never reads their contents
 - A cloud mount is never walked to check freshness: expect `freshness_not_checked`, and
   `jikji refresh` the folder when files were just added.
 
+## Calling Jikji Well
+
+Lessons from agent logs. Each is a general rule, not a case:
+
+- **Run `next_commands[]` exactly as written.** They are already shell-quoted (root, query and
+  `--retry-proof` are single-quoted words). Do not retype the proof or paste it unquoted: its value
+  contains spaces whenever the root or the query does, and the words after the first space become
+  stray arguments (`error: unexpected argument`). If a call fails with a usage error, fix the
+  quoting; it does not mean Jikji is unusable, so do not abandon it for raw search.
+- **One request, one call.** Do not fire the same request in parallel or repeat an empty result:
+  every call reads the same index and returns the same answer. After one retry, follow
+  `handoff_action`.
+- **Pick the narrowest folder that holds the answer.** `jikji find` on a whole home folder or `.`
+  of a huge tree searches everything under it and is slow. Name the project or sub-folder you mean;
+  results are limited to it and paths are relative to it.
+- **Names and identifiers are not content questions.** A bare file name (`check.py`) or an exact
+  symbol is answered faster by `glob` or `grep`; use Jikji for "which document is about X" and
+  "which file is named like X" when the folder is unknown or large. Lists of keywords
+  (`a b c d e f`) match unrelated files: give the few words that distinguish the target.
+- **Keep output small.** Add `--brief` to `jikji find ... --json` to drop the internal ranking
+  diagnostics (about 60% smaller); it keeps `paths`, `results`, `request_plan`, `notes`,
+  `index_status` and the retry contract. Use `--top-k 5` when only the best few matter.
+- **Hidden folders (`.claude`, `.codex`, `.config`) are not in default indexes.** An empty result
+  there carries `scope_has_no_indexed_files` and says so; a refresh of the parent will not add them.
+  Search them with `grep`, or ask the user before `jikji prepare <folder> --include-hidden`.
+- **Check the binary once.** `jikji --version` must match `jikji_version` in results. A broken or
+  shadowing `jikji` earlier on `PATH` (for example a leftover Python entry point) fails before any
+  search runs: report it instead of falling back silently.
+
 ## Stop Rule: Stop Discovery, Not The Task
 
 Retry proof and stop restrictions apply only to the discovery substep.

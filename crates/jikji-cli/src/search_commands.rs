@@ -276,6 +276,9 @@ fn run_find_like(mut args: FindArgs, find_mode: bool) -> jikji_core::Result<Exit
             truncate_array_field(&mut payload, key, 1);
         }
     }
+    if find_mode && args.brief {
+        drop_diagnostics(&mut payload);
+    }
     if args.json {
         print_json_compact(&payload)?;
     } else if !find_mode {
@@ -426,13 +429,25 @@ fn add_search_guidance(
                 ),
             )
         } else if indexed == 0 {
-            let next = match enclosing {
-                Some(found) => format!(
+            let hidden = hidden_component(&args.root, enclosing);
+            let next = match (enclosing, hidden) {
+                // Hidden folders (`.claude`, `.config`) are skipped by every default index, so a
+                // refresh of the parent would not add them: say that instead of promising it.
+                (Some(found), Some(name)) => format!(
+                    " `{name}` is a hidden folder: indexes skip hidden folders unless they are built with --include-hidden, so the enclosing index of {} will never hold it and a refresh would not add it. Search it with grep or direct reads, or ask the user before indexing it by itself with `jikji prepare {} --include-hidden`.",
+                    found.root.display(),
+                    args.root.display()
+                ),
+                (None, Some(name)) => format!(
+                    " `{name}` is a hidden folder: it is indexed only with `jikji prepare {} --include-hidden` (ask the user first).",
+                    args.root.display()
+                ),
+                (Some(found), None) => format!(
                     " The enclosing index of {} holds nothing from this folder (it was built before the folder existed, or skips it). Search it with grep or direct reads for now; `jikji refresh {}` would add it but reprocesses that whole root, so ask the user first.",
                     found.root.display(),
                     found.root.display()
                 ),
-                None => String::new(),
+                (None, None) => String::new(),
             };
             (
                 "scope_has_no_indexed_files",
@@ -453,6 +468,42 @@ fn add_search_guidance(
         notes.push(note(code, message));
     }
     payload["notes"] = serde_json::Value::Array(std::mem::take(notes));
+}
+
+/// Internal ranking diagnostics: large, and not something a caller acts on. `--brief` removes them;
+/// the default output keeps them for existing integrations.
+const DIAGNOSTIC_FIELDS: &[&str] = &[
+    "strategy_results",
+    "strategy_metadata",
+    "llm_judge_input",
+    "llm_judge_result",
+    "judge_candidate_slate",
+    "llm_search_plan",
+    "search_plan",
+    "confidence_factors",
+    "handoff_policy",
+];
+
+fn drop_diagnostics(payload: &mut serde_json::Value) {
+    if let Some(object) = payload.as_object_mut() {
+        for field in DIAGNOSTIC_FIELDS {
+            object.remove(*field);
+        }
+        object.insert("brief".to_owned(), serde_json::json!(true));
+    }
+}
+
+/// The first hidden (dot-prefixed) folder in the part of the path below the indexed root, which is
+/// the part the index would have to contain.
+fn hidden_component(requested: &Path, enclosing: Option<&EnclosingIndex>) -> Option<String> {
+    let below: &Path = match enclosing {
+        Some(found) => Path::new(&found.scope),
+        None => requested,
+    };
+    below.components().find_map(|component| {
+        let name = component.as_os_str().to_str()?;
+        (name.starts_with('.') && name.len() > 1 && name != "..").then(|| name.to_owned())
+    })
 }
 
 fn payload_paths_empty(payload: &serde_json::Value) -> bool {
@@ -499,11 +550,14 @@ fn emit_find_recovery(
     } else {
         ("jikji_retry", "needs_one_jikji_retry", false, 1, 0)
     };
+    // Every value is shell-quoted: the proof embeds the root and the query verbatim, so it holds
+    // spaces, quotes and `$` whenever they do. Pasted unquoted, the words after the first space
+    // become stray arguments (`error: unexpected argument`).
     let retry_command = format!(
-        "jikji find {} {:?} --json --after-jikji-retry --retry-proof {}",
-        args.root.display(),
-        args.query,
-        proof
+        "jikji find {} {} --json --after-jikji-retry --retry-proof {}",
+        crate::query_shape::shell_quote(&args.root.display().to_string()),
+        crate::query_shape::shell_quote(&args.query),
+        crate::query_shape::shell_quote(&proof)
     );
     let mut payload = serde_json::json!({
         "mode": "find",

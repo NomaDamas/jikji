@@ -66,6 +66,10 @@ directory. That is the expected fast-start path; it is separate from `find`.
 - `results[]`: per returned path, `file_kind`, `text_indexed`, `matched_in`
   (`name_path`/`text`), `matched_words` (which of `request_plan.query_words` the file contains)
   and `snippet` (the passage around the match, first 20 results).
+- `--brief` (with `--json`): drops internal ranking diagnostics (`strategy_results`,
+  `llm_judge_input`, `judge_candidate_slate`, `search_plan`, `llm_search_plan`, ...); keeps paths,
+  `results`, `request_plan`, `notes`, index status and the retry contract. `next_commands[]` are
+  shell-quoted and run as written.
 - `cloud_content` (cloud-mounted folders only): `mode` is `filename_only`, `approved_folder` or `indexed_before_policy` (text kept from an older index);
   note `cloud_filename_only` means contents of that folder are not indexed. Approve one folder
   with `jikji prepare FOLDER --approve-cloud-content` (ask the user first); withdraw with

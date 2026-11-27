@@ -10,6 +10,12 @@ pub(crate) struct FindArgs {
     pub(crate) top_k: usize,
     #[arg(long)]
     pub(crate) first: bool,
+    /// With --json, drop the internal ranking diagnostics (strategy_results, llm_judge_input,
+    /// judge_candidate_slate, ...) and keep what an agent acts on: paths, results (kind, matched
+    /// words, snippet), request_plan, notes, index status and the retry contract. About a third
+    /// of the default size.
+    #[arg(long)]
+    pub(crate) brief: bool,
     #[arg(long)]
     pub(crate) json: bool,
     #[arg(long)]
